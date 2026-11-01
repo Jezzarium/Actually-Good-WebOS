@@ -65,3 +65,7 @@ Copied to `/var/lib/webosbrew/init.d/` on the TV, where the Homebrew Channel run
 
 - [Lumen](https://github.com/ammar027/lumen-webos) (MIT): reference for the home screen and for proven Luna calls. No code copied.
 - [own-your-glass](https://github.com/JulioFerrero/own-your-glass) (MIT): installed alongside for privacy hardening.
+
+## License
+
+[MIT](LICENSE)
