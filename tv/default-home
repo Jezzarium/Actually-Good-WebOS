@@ -1,0 +1,74 @@
+#!/bin/sh
+# Open the default Home app (settings: general/defaultApps.home) at power-on, and
+# keep LG Home out of RAM while something else is the default.
+# Installed to /var/lib/webosbrew/init.d/ (run at boot by Homebrew Channel).
+# Pairs with general/homeAutoLaunch=off, which stops LG Home opening itself at power-on.
+# Switch Home back with setDefaultApp '{"category":"home","appId":"com.webos.app.home"}';
+# this script follows it. Undo: rm this script, kill its process, set homeAutoLaunch on.
+
+LG=com.webos.app.home
+PIDFILE=/tmp/default-home.pid
+
+[ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null && exit 0
+
+# luna-send only prints when stdin is redirected or a tty.
+luna() { luna-send -n 1 "$1" "$2" </dev/null 2>/dev/null; }
+field() { sed -n "s/.*\"$1\": *\"\([^\"]*\)\".*/\1/p"; }
+
+default_home() {
+    luna luna://com.webos.settingsservice/getSystemSettings \
+        '{"category":"general","keys":["defaultApps"]}' | field home
+}
+foreground() {
+    luna luna://com.webos.applicationManager/getForegroundAppInfo '{}' | field appId
+}
+
+evict_lg_home() {
+    home=$(default_home)
+    [ -n "$home" ] && [ "$home" != "$LG" ] || return 0
+    luna luna://com.webos.service.preloadmanager/setPreloadPolicy \
+        "{\"application\":{\"id\":\"$LG\",\"isEnabled\":false}}" >/dev/null
+    [ "$(foreground)" = "$LG" ] && return 0
+    # closeByAppId is ignored for LG Home, and SAM does not respawn it.
+    for pid in $(ps -eo pid,args | grep "[f]lutter-client -i $LG " | awk '{print $1}'); do
+        kill "$pid"
+    done
+}
+
+open_home() {
+    home=$(default_home)
+    [ -n "$home" ] || return 0
+    # The TV may still be bringing up its last input; retry until home stays in front.
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        if [ "$(foreground)" = "$home" ]; then
+            sleep 3
+            [ "$(foreground)" = "$home" ] && break
+        fi
+        luna luna://com.webos.applicationManager/launch "{\"id\":\"$home\"}" >/dev/null
+        sleep 2
+    done
+    evict_lg_home
+}
+
+(
+    sleep 20
+    # NO_BOOT_OPEN=1: started by hand while the TV is in use; only evict LG Home.
+    if [ -n "$NO_BOOT_OPEN" ]; then evict_lg_home; else open_home; fi
+    while :; do
+        prev=Active
+        luna-send -i luna://com.webos.service.tvpower/power/getPowerState '{"subscribe":true}' </dev/null 2>/dev/null |
+        while read -r line; do
+            # "processing" replies are steps inside a transition, not a settled state.
+            case "$line" in *'"processing"'*) continue ;; esac
+            state=$(echo "$line" | field state)
+            [ -n "$state" ] || continue
+            # A wake: back to Active from standby/suspend (not from screensaver or screen-off).
+            if [ "$state" = Active ] && [ "$prev" != Active ] && [ "$prev" != "Screen Saver" ] && [ "$prev" != "Screen Off" ]; then
+                open_home
+            fi
+            prev=$state
+        done
+        sleep 5
+    done
+) </dev/null >/dev/null 2>&1 &
+echo $! > "$PIDFILE"

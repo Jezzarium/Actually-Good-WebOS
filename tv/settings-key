@@ -1,0 +1,41 @@
+#!/bin/sh
+# Route the remote's Settings key to Quick Settings (com.lgtvtweaks.settings) by
+# inserting /var/lib/lgtv-tweaks/settingskey.js into surface-manager's key filter
+# list, just before LG's handleHotkeys. configd keeps setConfigs changes only
+# until reboot, so this re-applies it at boot. It also preloads the app hidden,
+# so the first press only has to show an already-loaded page.
+# Installed to /var/lib/webosbrew/init.d/. Undo: rm this script and reboot, or
+# setConfigs with the saved original list (tv/keyFilters_before.json in the repo).
+
+APP=com.lgtvtweaks.settings
+HANDLER=/var/lib/lgtv-tweaks/settingskey.js
+NAME=com.webos.surfacemanager.keyFilters
+
+[ -f "$HANDLER" ] || exit 0
+
+insert_handler() {
+    cur=$(luna-send -n 1 luna://com.webos.service.config/getConfigs \
+        "{\"configNames\":[\"$NAME\"]}" </dev/null 2>/dev/null)
+    case "$cur" in
+        *handleQuickSettingsKey*) return 0 ;;
+        *'{"handler":"handleHotkeys"'*)
+            list=$(printf '%s' "$cur" | sed -n "s/.*\"$NAME\":\(\[.*\]\).*/\1/p" |
+                sed "s#{\"handler\":\"handleHotkeys\"#{\"handler\":\"handleQuickSettingsKey\",\"file\":\"$HANDLER\"},&#")
+            luna-send -n 1 luna://com.webos.service.config/setConfigs \
+                "{\"configs\":{\"$NAME\":$list}}" </dev/null >/dev/null 2>&1
+            return 0 ;;
+    esac
+    return 1
+}
+
+(
+    # configd may not be up yet; retry for ~2 minutes.
+    for i in $(seq 1 24); do
+        insert_handler && break
+        sleep 5
+    done
+    # Let the boot-time app launches settle before loading ours in the background.
+    sleep 30
+    luna-send -n 1 luna://com.webos.applicationManager/launch \
+        "{\"id\":\"$APP\",\"preload\":\"full\",\"keepAlive\":true}" </dev/null >/dev/null 2>&1
+) </dev/null >/dev/null 2>&1 &

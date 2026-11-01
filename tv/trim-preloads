@@ -1,0 +1,60 @@
+#!/bin/sh
+# Stop LG's preload manager from keeping unused apps in RAM.
+# Installed to /var/lib/webosbrew/init.d/ (run at boot by Homebrew Channel).
+# The policy change only lasts until the next boot or wake from standby (LG resets
+# it and re-runs its one-shot preloads), so this re-applies it at boot and every wake.
+# Undo: rm this script, kill its process (/tmp/trim-preloads.pid) and reboot.
+
+APPS="com.webos.app.lgchannels com.webos.app.browser com.webos.app.voice amazon netflix com.webos.app.livetv"
+PIDFILE=/tmp/trim-preloads.pid
+
+[ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null && exit 0
+
+# luna-send only prints when stdin is redirected or a tty.
+luna() { luna-send -n 1 "$1" "$2" </dev/null 2>/dev/null; }
+
+# PIDs of preloaded (not user-launched) copies of an app.
+preloaded() {
+    ps -eo pid,args | grep -F "\"reason\":\"preload\"" | grep -F "/applications/$1/" | awk '{print $1}'
+}
+
+trim_once() {
+    fg=$(luna luna://com.webos.applicationManager/getForegroundAppInfo '{}')
+    for app in $APPS; do
+        luna luna://com.webos.service.preloadmanager/setPreloadPolicy \
+            "{\"application\":{\"id\":\"$app\",\"isEnabled\":false}}" >/dev/null
+        # Close copies that were preloaded, unless on screen.
+        case "$fg" in *"\"appId\":\"$app\""*) continue ;; esac
+        [ -n "$(preloaded "$app")" ] || continue
+        luna luna://com.webos.applicationManager/closeByAppId "{\"id\":\"$app\"}" >/dev/null
+        sleep 2
+        # Some apps (the voice app) ignore closeByAppId; SAM does not respawn them.
+        for pid in $(preloaded "$app"); do kill "$pid"; done
+    done
+}
+
+# Preloads trickle in for a while after boot/wake; keep trimming for ~2 minutes.
+trim() {
+    for i in 1 2 3 4 5 6; do
+        trim_once
+        sleep 20
+    done
+}
+
+(
+    trim
+    while :; do
+        prev=Active
+        luna-send -i luna://com.webos.service.tvpower/power/getPowerState '{"subscribe":true}' </dev/null 2>/dev/null |
+        while read -r line; do
+            # "processing" replies are steps inside a transition, not a settled state.
+            case "$line" in *'"processing"'*) continue ;; esac
+            state=$(echo "$line" | sed -n 's/.*"state": *"\([^"]*\)".*/\1/p')
+            [ -n "$state" ] || continue
+            [ "$state" = Active ] && [ "$prev" != Active ] && trim
+            prev=$state
+        done
+        sleep 5
+    done
+) </dev/null >/dev/null 2>&1 &
+echo $! > "$PIDFILE"
