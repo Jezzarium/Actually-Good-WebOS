@@ -5,6 +5,7 @@
 #include <SDL_image.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 
 namespace {
@@ -72,6 +73,7 @@ Texture Icons::get(const std::string &path) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         queue_.push_back(path);
+        pending_++;
     }
     wake_.notify_one();
     return {};
@@ -93,15 +95,30 @@ void Icons::upload_ready() {
             d = std::move(done_.front());
             done_.pop_front();
         }
-        Entry &entry = entries_[d.path];
-        if (d.rgba.empty()) {
-            entry.state = State::kFailed;
-        } else {
-            entry.texture = upload_rgba(d.rgba.data(), d.w, d.h);
-            entry.has_edge = d.has_edge;
-            entry.edge = d.edge;
-            entry.state = State::kReady;
-        }
+        upload(d);
+    }
+}
+
+void Icons::load_now(const std::vector<std::string> &paths, int timeout_ms) {
+    for (const std::string &path : paths) get(path);
+    std::deque<Decoded> done;
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        decoded_.wait_for(lock, std::chrono::milliseconds(timeout_ms), [this] { return pending_ == 0; });
+        done.swap(done_);
+    }
+    for (Decoded &d : done) upload(d);
+}
+
+void Icons::upload(Decoded &d) {
+    Entry &entry = entries_[d.path];
+    if (d.rgba.empty()) {
+        entry.state = State::kFailed;
+    } else {
+        entry.texture = upload_rgba(d.rgba.data(), d.w, d.h);
+        entry.has_edge = d.has_edge;
+        entry.edge = d.edge;
+        entry.state = State::kReady;
     }
 }
 
@@ -137,5 +154,7 @@ void Icons::worker() {
 
         std::lock_guard<std::mutex> lock(mutex_);
         done_.push_back(std::move(d));
+        pending_--;
+        decoded_.notify_all();
     }
 }

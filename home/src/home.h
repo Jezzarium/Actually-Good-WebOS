@@ -49,8 +49,11 @@ public:
     // All of LG's launch points; the layout decides order and what is hidden.
     void set_apps(const std::vector<App> &apps);
     void set_inputs(const std::vector<Input> &inputs);
-    // Where the layout is saved; loads it and re-applies it.
+    // Where the layout is saved (empty: nowhere yet); loads it and its
+    // wallpaper. Call before the first frame.
     void set_layout_path(const std::string &path);
+    // Loads every tile's icon before returning, for a complete first frame.
+    void load_icons_now(int timeout_ms);
 
     std::function<void(const std::string &app_id)> on_launch;  // apps and inputs alike
 

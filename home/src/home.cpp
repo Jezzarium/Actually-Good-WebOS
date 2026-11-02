@@ -112,11 +112,7 @@ bool Home::init(int w, int h, const char *font_path, const std::string &assets) 
         row.label = render_text(pill_font_, name);
         settings_.rows.push_back(row);
     }
-    load_wallpaper_image();
-    night_.snap(night_now() ? 1 : 0);
     refresh_clock();
-    set_apps(placeholder_apps());
-    set_inputs(placeholder_inputs());
     return true;
 }
 
@@ -238,8 +234,14 @@ void Home::set_layout_path(const std::string &path) {
     layout_path_ = path;
     if (!layout_.load(path)) layout_ = {};
     load_wallpaper_image();
-    night_.target = night_now() ? 1 : 0;
+    night_.snap(night_now() ? 1 : 0);
     rebuild_tiles();
+}
+
+void Home::load_icons_now(int timeout_ms) {
+    std::vector<std::string> paths{assets_ + "/icons/settings.png"};
+    for (const Tile &t : tiles_) paths.push_back(t.app.icon);
+    icons_.load_now(paths, timeout_ms);
 }
 
 void Home::save_layout() {
