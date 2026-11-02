@@ -663,9 +663,11 @@ void Home::menu_pointer(Menu &m, float x, float y) {
 void Home::draw_menu(Painter &p, Menu &m, float x, float y, float width, float alpha) {
     float a = std::clamp(m.anim.x, 0.f, 1.f) * alpha;
     if (a < 0.01f) return;
-    // Drops in a little as it opens.
+    // Drops in a little as it opens, on whole pixels: text inside is rounded to
+    // pixels too, and a sub-pixel offset while the spring settles made it flicker
+    // between two rows.
     float header = m.title.id ? kMenuTitleH : 0;
-    Rect panel{x, y - 18 * (1 - a), width, header + 2 * kMenuPad + m.rows.size() * kMenuRowH};
+    Rect panel{x, std::round(y - 18 * (1 - a)), width, header + 2 * kMenuPad + m.rows.size() * kMenuRowH};
     m.rect = panel;
     p.shadow(panel, kMenuRadius, 40, rgb(0x000000, 0.45f), a);
     p.glass(panel, kMenuRadius, rgb(0x0b1016, 0.45f), a);
