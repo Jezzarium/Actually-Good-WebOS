@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <ctime>
+#include <map>
 
 namespace {
 
@@ -24,6 +25,7 @@ constexpr float kIconRadius = 18;
 // Springs: tvOS motion is quick but not bouncy.
 constexpr float kFocusStiffness = 260, kFocusDamping = 26;
 constexpr float kScrollStiffness = 140, kScrollDamping = 24;
+constexpr float kSlideStiffness = 220, kSlideDamping = 26;  // tiles moving to a new slot
 // Lean: the focused tile's small slide in the direction of travel, which also
 // carries the shine. Slightly underdamped so it settles with life.
 constexpr float kLeanStiffness = 200, kLeanDamping = 17;
@@ -32,15 +34,22 @@ constexpr float kLeanPixels = 7;
 // a full lean moves it.
 constexpr float kShineX = 0.5f, kShineY = -0.05f, kShineTravel = 0.55f;
 
-// Pointer: holding it this close to the top or bottom edge scrolls the page.
-constexpr float kEdgeZone = 110, kEdgeSpeed = 900;  // pixels, pixels per second
+// Holding OK this long opens the tile menu.
+constexpr float kLongPress = 0.6f;
+// The picked-up tile's wiggle: radians either way, and how fast.
+constexpr float kWiggleAngle = 0.035f, kWiggleSpeed = 15;
 
-// Inputs panel.
-constexpr float kPanelW = 480, kPanelPad = 12, kInputRowH = 72, kPanelRadius = 30;
+// Menus (Inputs, the tile menu).
+constexpr float kMenuPad = 12, kMenuRowH = 72, kMenuRadius = 30;
+constexpr float kInputsW = 480, kTileMenuW = 300;
 
 Color shade(uint32_t hex, float k, float lift = 0) {
     Color c = rgb(hex);
     return {std::min(1.f, c.r * k + lift), std::min(1.f, c.g * k + lift), std::min(1.f, c.b * k + lift), 1};
+}
+
+bool inside(Rect r, float x, float y) {
+    return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 }
 
 }  // namespace
@@ -52,6 +61,20 @@ void Spring::step(float dt, float stiffness, float damping) {
         v += ((target - x) * stiffness - v * damping) * h;
         x += v * h;
     }
+}
+
+void Home::Menu::show() {
+    open = true;
+    anim.target = 1;
+    highlight.snap(float(focus));
+}
+
+void Home::Menu::clear() {
+    for (Row &row : rows) {
+        destroy(row.label);
+        destroy(row.detail);
+    }
+    rows.clear();
 }
 
 bool Home::init(int w, int h, const char *font_path, const std::string &assets) {
@@ -67,96 +90,87 @@ bool Home::init(int w, int h, const char *font_path, const std::string &assets) 
         return false;
     }
 
-    inputs_ = render_text(pill_font_, "Inputs");
+    inputs_label_ = render_text(pill_font_, "Inputs");
+    for (const char *action : {"Move", "Hide"}) {
+        Menu::Row row;
+        row.label = render_text(pill_font_, action);
+        tile_menu_.rows.push_back(row);
+    }
     refresh_clock();
     set_apps(placeholder_apps());
     set_inputs(placeholder_inputs());
     return true;
 }
 
-void Home::set_inputs(const std::vector<Input> &inputs) {
-    for (InputRow &row : input_rows_) {
-        destroy(row.name);
-        destroy(row.port);
-    }
-    input_rows_.clear();
-    for (const Input &input : inputs) {
-        InputRow row;
-        row.input = input;
-        row.name = render_text(pill_font_, input.label);
-        // The port only when the name doesn't already say it.
-        if (input.label != input.port) row.port = render_text(label_font_, input.port);
-        input_rows_.push_back(std::move(row));
-    }
-    input_focus_ = std::clamp(input_focus_, 0, std::max(0, int(input_rows_.size()) - 1));
-    if (input_rows_.empty()) inputs_open_ = false;
-    inputs_anim_.target = inputs_open_ ? 1 : 0;
-}
-
-void Home::inputs_key(SDL_Keycode key) {
-    int n = int(input_rows_.size());
-    switch (key) {
-    case SDLK_UP:
-    case SDLK_DOWN: {
-        int next = input_focus_ + (key == SDLK_DOWN ? 1 : -1);
-        if (next >= 0 && next < n) {
-            input_focus_ = next;
-            input_highlight_.target = float(next);
-        } else {
-            input_highlight_.v += (key == SDLK_DOWN ? 4 : -4);  // bump at the ends
-        }
-        break;
-    }
-    case SDLK_RETURN:
-        if (on_launch && input_focus_ < n) on_launch(input_rows_[input_focus_].input.app_id);
-        inputs_open_ = false;
-        break;
-    case SDLK_ESCAPE:
-    case SDLK_AC_BACK:
-    case SDLK_LEFT:
-        inputs_open_ = false;
-        break;
-    default: LOG("home: key %d", int(key)); break;
-    }
-    inputs_anim_.target = inputs_open_ ? 1 : 0;
-}
+// --- Apps and layout -------------------------------------------------------
 
 void Home::set_apps(const std::vector<App> &apps) {
-    Uint64 t0 = SDL_GetPerformanceCounter();
+    apps_ = apps;
+    rebuild_tiles();
+}
+
+void Home::set_layout_path(const std::string &path) {
+    layout_path_ = path;
+    if (!layout_.load(path)) layout_ = {};
+    rebuild_tiles();
+}
+
+void Home::save_layout() {
+    layout_.order.clear();
+    for (const Tile &t : tiles_) layout_.order.push_back(t.app.id);
+    if (!layout_path_.empty()) layout_.save(layout_path_);
+}
+
+void Home::rebuild_tiles() {
     std::string focused;
     if (row_ != kPill && !tiles_.empty()) focused = tiles_[tile_index(row_, col_)].app.id;
-    for (Tile &t : tiles_) {
-        destroy(t.name);
-        destroy(t.label);
-    }
+
+    // Keep tiles that stay, with their textures and positions, so they slide.
+    std::map<std::string, Tile> old;
+    for (Tile &t : tiles_) old[t.app.id] = std::move(t);
     tiles_.clear();
-    for (const App &app : apps) {
+    for (const App &app : layout_.apply(apps_)) {
+        auto it = old.find(app.id);
+        if (it != old.end() && it->second.app.title == app.title) {
+            tiles_.push_back(std::move(it->second));
+            tiles_.back().app = app;
+            old.erase(it);
+            continue;
+        }
         Tile t;
         t.app = app;
         t.name = render_text(tile_font_, app.title);
         t.label = render_text(label_font_, app.title);
         tiles_.push_back(std::move(t));
     }
+    for (auto &entry : old) {
+        destroy(entry.second.name);
+        destroy(entry.second.label);
+    }
+    // New tiles start in their slot rather than flying in.
+    for (int i = 0; i < int(tiles_.size()); i++) {
+        Tile &t = tiles_[i];
+        if (t.x.target == 0 && t.y.target == 0) {
+            int row, col;
+            index_to_slot(i, &row, &col);
+            Rect r = tile_rect(row, col);
+            t.x.snap(r.x);
+            t.y.snap(r.y);
+        }
+    }
+
     if (tiles_.empty()) {
+        moving_ = false;
         move_focus(kPill, 0, 0, 0);
         return;
     }
-
     int row = 0, col = 0;
     for (int i = 0; i < int(tiles_.size()); i++) {
-        if (tiles_[i].app.id != focused) continue;
-        if (i < dock_count()) {
-            col = i;
-        } else {
-            row = 1 + (i - dock_count()) / kCols;
-            col = (i - dock_count()) % kCols;
-        }
+        if (tiles_[i].app.id == focused) index_to_slot(i, &row, &col);
     }
     row_ = col_ = -2;  // force a fresh focus, not a bump
     move_focus(row, col, 0, 0);
     for (Tile &t : tiles_) t.focus.snap(t.focus.target);
-    LOG("home: set_apps %zu in %.0f ms", tiles_.size(),
-        double(SDL_GetPerformanceCounter() - t0) * 1000 / SDL_GetPerformanceFrequency());
 }
 
 int Home::dock_count() const { return std::min<int>(kCols, int(tiles_.size())); }
@@ -177,10 +191,41 @@ int Home::tile_index(int row, int col) const {
     return row == 0 ? col : dock_count() + (row - 1) * kCols + col;
 }
 
+void Home::index_to_slot(int index, int *row, int *col) const {
+    if (index < kCols) {
+        *row = 0;
+        *col = index;
+    } else {
+        *row = 1 + (index - kCols) / kCols;
+        *col = (index - kCols) % kCols;
+    }
+}
+
 Rect Home::tile_rect(int row, int col) const {
     float y = row == 0 ? kDockTop : kGridTop + (row - 1) * kRowPitch;
     return {kLeft + col * (kTileW + kGapX), y, kTileW, kTileH};
 }
+
+// --- Inputs ----------------------------------------------------------------
+
+void Home::set_inputs(const std::vector<Input> &inputs) {
+    inputs_ = inputs;
+    inputs_menu_.clear();
+    for (const Input &input : inputs) {
+        Menu::Row row;
+        row.label = render_text(pill_font_, input.label);
+        // The port only when the name doesn't already say it.
+        if (input.label != input.port) row.detail = render_text(label_font_, input.port);
+        row.dot = true;
+        row.dot_color = input.connected ? 0x30d158 : 0x8e8e93;
+        inputs_menu_.rows.push_back(row);
+    }
+    int n = int(inputs_menu_.rows.size());
+    inputs_menu_.focus = std::clamp(inputs_menu_.focus, 0, std::max(0, n - 1));
+    if (n == 0) inputs_menu_.hide();
+}
+
+// --- Focus and keys --------------------------------------------------------
 
 void Home::move_focus(int row, int col, int dx, int dy, bool scroll) {
     row = std::clamp(row, kPill, row_count() - 1);
@@ -205,7 +250,7 @@ void Home::move_focus(int row, int col, int dx, int dy, bool scroll) {
     col_ = col;
     if (row == 0) dock_col_ = col;
 
-    for (size_t i = 0; i < tiles_.size(); i++) tiles_[i].focus.target = 0;
+    for (Tile &t : tiles_) t.focus.target = 0;
     if (row != kPill) tiles_[tile_index(row, col)].focus.target = 1;
     pill_focus_.target = row == kPill ? 1 : 0;
 
@@ -220,99 +265,64 @@ void Home::move_focus(int row, int col, int dx, int dy, bool scroll) {
     grid_.target = row >= 1 ? 1 : 0;
 }
 
-float Home::max_scroll() const {
-    int last = row_count() - 1;
-    if (last < 1) return 0;
-    return std::max(kGridTop - 300, kGridTop + (last - 1) * kRowPitch - 540);
-}
-
-bool Home::hit_tile(float x, float y, int *row, int *col) const {
-    for (int r = 0; r < row_count(); r++) {
-        for (int c = 0; c < row_length(r); c++) {
-            Rect t = tile_rect(r, c);
-            t.y -= scroll_.x;
-            if (x >= t.x && x < t.x + t.w && y >= t.y && y < t.y + t.h) {
-                *row = r;
-                *col = c;
-                return true;
-            }
-        }
+std::vector<float> Home::scroll_stops() const {
+    // The same resting places the D-pad scrolls to, one per row.
+    std::vector<float> stops{0};
+    for (int row = 1; row < row_count(); row++) {
+        float top = kGridTop + (row - 1) * kRowPitch;
+        float stop = std::max(kGridTop - 300, top - 540);
+        if (stop > stops.back() + 1) stops.push_back(stop);
     }
-    return false;
+    return stops;
 }
 
-void Home::activate() {
-    if (row_ == kPill) {
-        if (!input_rows_.empty()) {
-            inputs_open_ = true;
-            inputs_anim_.target = 1;
-            input_highlight_.snap(float(input_focus_));
-        }
-    } else if (on_launch) {
-        on_launch(tiles_[tile_index(row_, col_)].app.id);
-    }
-}
-
-static bool inside(Rect r, float x, float y) {
-    return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
-}
-
-void Home::pointer_move(float x, float y) {
-    pointer_ = true;
-    px_ = x;
-    py_ = y;
-    if (inputs_open_) {
-        if (inside(panel_rect_, x, y)) {
-            int i = int((y - panel_rect_.y - kPanelPad) / kInputRowH);
-            if (i >= 0 && i < int(input_rows_.size()) && i != input_focus_) {
-                input_focus_ = i;
-                input_highlight_.target = float(i);
-            }
-        }
-        return;
-    }
-    int row, col;
-    if (inside(button_rect_, x, y) && grid_.x < 0.5f) {
-        if (row_ != kPill) move_focus(kPill, 0, 0, 0, false);
-    } else if (hit_tile(x, y, &row, &col) && (row != row_ || col != col_)) {
-        move_focus(row, col, 0, 0, false);
-    }
-}
-
-void Home::pointer_click() {
-    if (inputs_open_) {
-        if (inside(panel_rect_, px_, py_)) {
-            inputs_key(SDLK_RETURN);
-        } else {
-            inputs_open_ = false;
-            inputs_anim_.target = 0;
-        }
-        return;
-    }
-    int row, col;
-    bool on_button = inside(button_rect_, px_, py_) && row_ == kPill;
-    bool on_tile = hit_tile(px_, py_, &row, &col) && row == row_ && col == col_;
-    if (on_button || on_tile) activate();
-}
-
-void Home::wheel(int steps) {
-    if (inputs_open_) {
-        inputs_key(steps > 0 ? SDLK_UP : SDLK_DOWN);
-        return;
-    }
-    // Scroll the page a row at a time, leaving focus to the pointer.
-    scroll_.target = std::clamp(scroll_.target - steps * kRowPitch, 0.f, max_scroll());
-    grid_.target = scroll_.target > 1 ? 1 : 0;
-}
-
-void Home::key(SDL_Keycode key) {
+void Home::key_down(SDL_Keycode key, bool repeat) {
     if (pointer_) {
         // Back to the D-pad: scroll to wherever focus is.
         pointer_ = false;
         if (row_ >= 1 || scroll_.target > 0) move_focus(row_, col_, 0, 0);
     }
-    if (inputs_open_) {
-        inputs_key(key);
+    if (key == SDLK_RETURN) {
+        if (!repeat) {
+            holding_ = true;
+            held_long_ = hold_pointer_ = false;
+            hold_time_ = 0;
+        }
+        return;
+    }
+    press(key);
+}
+
+void Home::key_up(SDL_Keycode key) {
+    if (key != SDLK_RETURN || !holding_ || hold_pointer_) return;
+    holding_ = false;
+    if (!held_long_) press(SDLK_RETURN);
+}
+
+void Home::press(SDL_Keycode key) {
+    if (tile_menu_.open) {
+        if (menu_key(tile_menu_, key) == MenuResult::kChosen) {
+            if (tile_menu_.focus == 0) {
+                moving_ = true;
+                wiggle_.target = 1;
+            } else if (row_ != kPill) {
+                layout_.hidden.push_back(tiles_[tile_index(row_, col_)].app.id);
+                tiles_.erase(tiles_.begin() + tile_index(row_, col_));
+                save_layout();
+                rebuild_tiles();
+            }
+        }
+        return;
+    }
+    if (inputs_menu_.open) {
+        if (menu_key(inputs_menu_, key) == MenuResult::kChosen && on_launch &&
+            inputs_menu_.focus < int(inputs_.size())) {
+            on_launch(inputs_[inputs_menu_.focus].app_id);
+        }
+        return;
+    }
+    if (moving_) {
+        move_key(key);
         return;
     }
     switch (key) {
@@ -329,6 +339,214 @@ void Home::key(SDL_Keycode key) {
     }
 }
 
+void Home::activate() {
+    if (row_ == kPill) {
+        if (!inputs_menu_.rows.empty()) inputs_menu_.show();
+    } else if (on_launch) {
+        on_launch(tiles_[tile_index(row_, col_)].app.id);
+    }
+}
+
+void Home::long_press() {
+    if (row_ == kPill || moving_ || tile_menu_.open || inputs_menu_.open || tiles_.empty()) return;
+    tile_menu_.focus = 0;
+    tile_menu_.show();
+}
+
+void Home::move_key(SDL_Keycode key) {
+    int n = int(tiles_.size());
+    int i = tile_index(row_, col_), j = i, dx = 0, dy = 0;
+    switch (key) {
+    case SDLK_LEFT: j = i - 1, dx = -1; break;
+    case SDLK_RIGHT: j = i + 1, dx = 1; break;
+    case SDLK_UP:
+        dy = -1;
+        if (row_ == 1) j = std::min(col_, kCols - 1);  // into the dock, at the same column
+        else if (row_ > 1) j = i - kCols;
+        break;
+    case SDLK_DOWN:
+        dy = 1;
+        if (row_ == 0) j = std::min(n - 1, kCols + col_);
+        else if (row_ < row_count() - 1) j = std::min(n - 1, i + kCols);
+        break;
+    case SDLK_RETURN:
+    case SDLK_ESCAPE:
+    case SDLK_AC_BACK:
+        moving_ = false;
+        wiggle_.target = 0;
+        save_layout();
+        return;
+    default: return;
+    }
+    if (j < 0 || j >= n || j == i) {
+        Tile &t = tiles_[i];
+        t.lean_x.v += dx * 9;
+        t.lean_y.v += dy * 9;
+        return;
+    }
+    Tile t = std::move(tiles_[i]);
+    tiles_.erase(tiles_.begin() + i);
+    tiles_.insert(tiles_.begin() + j, std::move(t));
+    int row, col;
+    index_to_slot(j, &row, &col);
+    row_ = col_ = -2;
+    move_focus(row, col, 0, 0);
+}
+
+// --- Pointer ---------------------------------------------------------------
+
+bool Home::hit_tile(float x, float y, int *row, int *col) const {
+    for (int r = 0; r < row_count(); r++) {
+        for (int c = 0; c < row_length(r); c++) {
+            Rect t = tile_rect(r, c);
+            t.y -= scroll_.x;
+            if (inside(t, x, y)) {
+                *row = r;
+                *col = c;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void Home::pointer_move(float x, float y) {
+    pointer_ = true;
+    px_ = x;
+    py_ = y;
+    if (tile_menu_.open) return menu_pointer(tile_menu_, x, y);
+    if (inputs_menu_.open) return menu_pointer(inputs_menu_, x, y);
+    if (moving_) return;
+    int row, col;
+    if (inside(button_rect_, x, y) && grid_.x < 0.5f) {
+        if (row_ != kPill) move_focus(kPill, 0, 0, 0, false);
+    } else if (hit_tile(x, y, &row, &col) && (row != row_ || col != col_)) {
+        move_focus(row, col, 0, 0, false);
+    }
+}
+
+void Home::pointer_hidden() {
+    pointer_ = false;
+    rehover_ = false;
+}
+
+void Home::options() { long_press(); }
+
+void Home::pointer_down() {
+    holding_ = hold_pointer_ = true;
+    held_long_ = false;
+    hold_time_ = 0;
+}
+
+void Home::pointer_up() {
+    if (!holding_ || !hold_pointer_) return;
+    holding_ = false;
+    if (held_long_) return;
+    // A click.
+    for (Menu *m : {&tile_menu_, &inputs_menu_}) {
+        if (!m->open) continue;
+        if (inside(m->rect, px_, py_)) press(SDLK_RETURN);
+        else m->hide();
+        return;
+    }
+    if (moving_) return press(SDLK_RETURN);  // drop
+    int row, col;
+    bool on_button = inside(button_rect_, px_, py_) && row_ == kPill;
+    bool on_tile = hit_tile(px_, py_, &row, &col) && row == row_ && col == col_;
+    if (on_button || on_tile) activate();
+}
+
+void Home::wheel(int steps) {
+    if (tile_menu_.open || inputs_menu_.open || moving_) {
+        press(steps > 0 ? SDLK_UP : SDLK_DOWN);
+        return;
+    }
+    // One row per step, snapping to the D-pad's resting places; focus goes to
+    // whatever is under the pointer once the page settles.
+    std::vector<float> stops = scroll_stops();
+    int nearest = 0;
+    for (int i = 0; i < int(stops.size()); i++) {
+        if (std::abs(stops[i] - scroll_.target) < std::abs(stops[nearest] - scroll_.target)) nearest = i;
+    }
+    int next = std::clamp(nearest - steps, 0, int(stops.size()) - 1);
+    scroll_.target = stops[next];
+    grid_.target = next > 0 ? 1 : 0;
+    rehover_ = pointer_;
+}
+
+// --- Menus -----------------------------------------------------------------
+
+Home::MenuResult Home::menu_key(Menu &m, SDL_Keycode key) {
+    int n = int(m.rows.size());
+    switch (key) {
+    case SDLK_UP:
+    case SDLK_DOWN: {
+        int next = m.focus + (key == SDLK_DOWN ? 1 : -1);
+        if (next >= 0 && next < n) {
+            m.focus = next;
+            m.highlight.target = float(next);
+        } else {
+            m.highlight.v += (key == SDLK_DOWN ? 4 : -4);  // bump at the ends
+        }
+        return MenuResult::kNone;
+    }
+    case SDLK_RETURN:
+        m.hide();
+        return MenuResult::kChosen;
+    case SDLK_ESCAPE:
+    case SDLK_AC_BACK:
+    case SDLK_LEFT:
+        m.hide();
+        return MenuResult::kClosed;
+    default: return MenuResult::kNone;
+    }
+}
+
+void Home::menu_pointer(Menu &m, float x, float y) {
+    if (!inside(m.rect, x, y)) return;
+    int i = int((y - m.rect.y - kMenuPad) / kMenuRowH);
+    if (i >= 0 && i < int(m.rows.size()) && i != m.focus) {
+        m.focus = i;
+        m.highlight.target = float(i);
+    }
+}
+
+void Home::draw_menu(Painter &p, Menu &m, float x, float y, float width, float alpha) {
+    float a = std::clamp(m.anim.x, 0.f, 1.f) * alpha;
+    if (a < 0.01f) return;
+    // Drops in a little as it opens.
+    Rect panel{x, y - 18 * (1 - a), width, 2 * kMenuPad + m.rows.size() * kMenuRowH};
+    m.rect = panel;
+    p.shadow(panel, kMenuRadius, 40, rgb(0x000000, 0.45f), a);
+    p.glass(panel, kMenuRadius, rgb(0x0b1016, 0.45f), a);
+
+    Rect highlight{panel.x + kMenuPad, panel.y + kMenuPad + m.highlight.x * kMenuRowH, panel.w - 2 * kMenuPad,
+                   kMenuRowH};
+    p.fill(highlight, kMenuRadius - kMenuPad, rgb(0xffffff), rgb(0xffffff), a);
+
+    for (size_t i = 0; i < m.rows.size(); i++) {
+        const Menu::Row &row = m.rows[i];
+        float ry = panel.y + kMenuPad + i * kMenuRowH;
+        // How much the highlight covers this row: text turns dark under it.
+        float lit = std::clamp(1 - std::abs(m.highlight.x - float(i)), 0.f, 1.f);
+        Color text = {1 - 0.9f * lit, 1 - 0.9f * lit, 1 - 0.88f * lit, 1};
+        float tx = panel.x + kMenuPad + 26;
+        if (row.dot) {
+            Rect dot{tx, ry + (kMenuRowH - 12) / 2, 12, 12};
+            p.fill(dot, 6, rgb(row.dot_color), rgb(row.dot_color), a);
+            tx += dot.w + 18;
+        }
+        p.text(std::round(tx), std::round(ry + (kMenuRowH - row.label.h) / 2), row.label, text, a);
+        if (row.detail.id) {
+            Color dim = {text.r, text.g, text.b, 0.6f};
+            p.text(std::round(panel.x + panel.w - kMenuPad - 26 - row.detail.w),
+                   std::round(ry + (kMenuRowH - row.detail.h) / 2), row.detail, dim, a);
+        }
+    }
+}
+
+// --- Frame -----------------------------------------------------------------
+
 void Home::refresh_clock() {
     std::time_t now = std::time(nullptr);
     std::tm local;
@@ -342,49 +560,74 @@ void Home::refresh_clock() {
 }
 
 void Home::update(float dt) {
+    time_ += dt;
     icons_.upload_ready();
-    if (pointer_ && !inputs_open_) {
-        // Edge scrolling, and the focused tile leaning toward the pointer.
-        if (py_ > h_ - kEdgeZone) scroll_.target = std::min(max_scroll(), scroll_.target + kEdgeSpeed * dt);
-        if (py_ < kEdgeZone) scroll_.target = std::max(0.f, scroll_.target - kEdgeSpeed * dt);
-        grid_.target = scroll_.target > 1 ? 1 : 0;
+
+    if (holding_ && !held_long_) {
+        hold_time_ += dt;
+        int row, col;
+        bool on_focus = !hold_pointer_ || (hit_tile(px_, py_, &row, &col) && row == row_ && col == col_);
+        if (hold_time_ >= kLongPress && on_focus) {
+            held_long_ = true;
+            long_press();
+        }
     }
+    if (rehover_ && std::abs(scroll_.x - scroll_.target) < 2 && std::abs(scroll_.v) < 20) {
+        rehover_ = false;
+        pointer_move(px_, py_);
+    }
+
     for (int i = 0; i < int(tiles_.size()); i++) {
         Tile &t = tiles_[i];
-        float lx = 0, ly = 0;
         int row, col;
-        if (pointer_ && row_ != kPill && i == tile_index(row_, col_) && hit_tile(px_, py_, &row, &col) &&
-            row == row_ && col == col_) {
-            Rect r = tile_rect(row, col);
+        index_to_slot(i, &row, &col);
+        Rect slot = tile_rect(row, col);
+        t.x.target = slot.x;
+        t.y.target = slot.y;
+        t.x.step(dt, kSlideStiffness, kSlideDamping);
+        t.y.step(dt, kSlideStiffness, kSlideDamping);
+
+        // While the pointer rests on the focused tile, it leans toward it.
+        float lx = 0, ly = 0;
+        bool menus = tile_menu_.open || inputs_menu_.open;
+        if (pointer_ && !menus && !moving_ && row == row_ && col == col_) {
+            Rect r = slot;
             r.y -= scroll_.x;
-            lx = std::clamp((px_ - (r.x + r.w / 2)) / (r.w / 2), -1.f, 1.f) * 0.8f;
-            ly = std::clamp((py_ - (r.y + r.h / 2)) / (r.h / 2), -1.f, 1.f) * 0.8f;
+            if (inside(r, px_, py_)) {
+                lx = std::clamp((px_ - (r.x + r.w / 2)) / (r.w / 2), -1.f, 1.f) * 0.8f;
+                ly = std::clamp((py_ - (r.y + r.h / 2)) / (r.h / 2), -1.f, 1.f) * 0.8f;
+            }
         }
         t.lean_x.target = lx;
         t.lean_y.target = ly;
-    }
-    for (Tile &t : tiles_) {
         t.focus.step(dt, kFocusStiffness, kFocusDamping);
         t.lean_x.step(dt, kLeanStiffness, kLeanDamping);
         t.lean_y.step(dt, kLeanStiffness, kLeanDamping);
     }
     pill_focus_.step(dt, kFocusStiffness, kFocusDamping);
-    inputs_anim_.step(dt, kFocusStiffness, kFocusDamping);
-    input_highlight_.step(dt, kFocusStiffness, kFocusDamping);
+    for (Menu *m : {&inputs_menu_, &tile_menu_}) {
+        m->anim.step(dt, kFocusStiffness, kFocusDamping);
+        m->highlight.step(dt, kFocusStiffness, kFocusDamping);
+    }
+    wiggle_.step(dt, kFocusStiffness, kFocusDamping);
     scroll_.step(dt, kScrollStiffness, kScrollDamping);
     grid_.step(dt, kScrollStiffness, kScrollDamping);
     refresh_clock();
 }
 
-void Home::draw_tile(Painter &p, int row, int col) {
-    Tile &tile = tiles_[tile_index(row, col)];
+void Home::draw_tile(Painter &p, int index) {
+    Tile &tile = tiles_[index];
+    int row, col;
+    index_to_slot(index, &row, &col);
     float f = std::max(0.f, tile.focus.x);
-    Rect r = tile_rect(row, col);
-    r.y -= scroll_.x;
+    Rect r{tile.x.x, tile.y.x - scroll_.x, kTileW, kTileH};
     if (r.y > h_ + 40 || r.y + r.h < -80) return;
-    Rect s = r.scaled(1 + kFocusScale * f);
+    bool picked = moving_ && row == row_ && col == col_;
+    float k = 1 + kFocusScale * f + (picked ? 0.04f * wiggle_.x : 0);
+    Rect s = r.scaled(k);
     s.x += tile.lean_x.x * kLeanPixels * f;
     s.y += tile.lean_y.x * kLeanPixels * f;
+    if (picked) p.set_rotation(kWiggleAngle * wiggle_.x * std::sin(time_ * kWiggleSpeed));
 
     if (f > 0.01f) {
         Rect shadow = s;
@@ -398,10 +641,9 @@ void Home::draw_tile(Painter &p, int row, int col) {
     // A gentle vertical gradient, flat where it has to meet the icon's edge.
     Color top = seamless ? rgb(color) : shade(color, 1.15f, 0.06f);
     Color bottom = seamless ? rgb(color) : shade(color, 0.85f);
-    float radius = kRadius * (1 + kFocusScale * f);
+    float radius = kRadius * k;
     p.fill(s, radius, top, bottom);
 
-    float k = 1 + kFocusScale * f;
     Texture icon = icons_.get(tile.app.icon);
     if (icon.id) {
         float ih = kIconSize * k, iw = ih * icon.w / icon.h;
@@ -414,6 +656,7 @@ void Home::draw_tile(Painter &p, int row, int col) {
     }
     // Over the icon too, so the whole tile catches the light like a sheet of glass.
     p.shine(s, radius, sx, sy, 0.24f * f);
+    p.set_rotation(0);
 
     if (row >= 1) {
         p.text(std::round(r.x + (r.w - tile.label.w) / 2), std::round(s.y + s.h + 14), tile.label,
@@ -439,19 +682,16 @@ void Home::render(Painter &p) {
     p.fill(screen, 0, rgb(0x000000, 0.35f), rgb(0x000000, 0.45f), g);
 
     // Unfocused tiles first, so the focused one is drawn over its neighbours.
-    for (int pass = 0; pass < 2; pass++) {
-        for (int row = 0; row < row_count(); row++) {
-            for (int col = 0; col < row_length(row); col++) {
-                bool focused = row == row_ && col == col_;
-                if (focused == (pass == 1)) draw_tile(p, row, col);
-            }
-        }
+    int focused = row_ == kPill || tiles_.empty() ? -1 : tile_index(row_, col_);
+    for (int i = 0; i < int(tiles_.size()); i++) {
+        if (i != focused) draw_tile(p, i);
     }
+    if (focused >= 0) draw_tile(p, focused);
 
     // Status pill: clock and the Inputs button, fading out in the grid.
     float pf = std::max(0.f, pill_focus_.x), alpha = 1 - g;
     float pad = 26, gap = 22, height = 64;
-    Rect button{0, 0, inputs_.w + 2 * pad, height - 12};
+    Rect button{0, 0, inputs_label_.w + 2 * pad, height - 12};
     float width = pad + clock_.w + gap + button.w + 6;
     Rect pill{1920 - kLeft + kDockPad - width, 64, width, height};
     button.x = pill.x + pill.w - button.w - 6;
@@ -465,43 +705,25 @@ void Home::render(Painter &p) {
     if (pf > 0.01f) p.shadow(b, b.h / 2, 18, rgb(0x000000, 0.4f), pf * alpha);
     p.fill(b, b.h / 2, rgb(0xffffff, 0.10f + 0.90f * pf), rgb(0xffffff, 0.10f + 0.90f * pf), alpha);
     Color label = {1 - 0.9f * pf, 1 - 0.9f * pf, 1 - 0.88f * pf, 1};
-    p.text(std::round(b.x + (b.w - inputs_.w) / 2), std::round(b.y + (b.h - inputs_.h) / 2), inputs_, label, alpha);
+    p.text(std::round(b.x + (b.w - inputs_label_.w) / 2), std::round(b.y + (b.h - inputs_label_.h) / 2),
+           inputs_label_, label, alpha);
 
-    draw_inputs(p, pill);
-}
-
-void Home::draw_inputs(Painter &p, Rect pill) {
-    float a = std::clamp(inputs_anim_.x, 0.f, 1.f);
-    if (a < 0.01f) return;
-    Rect screen{0, 0, float(w_), float(h_)};
-    p.fill(screen, 0, rgb(0x000000, 0.30f), rgb(0x000000, 0.30f), a);
-
-    float h = 2 * kPanelPad + input_rows_.size() * kInputRowH;
-    // Drops down a little from under the pill as it opens.
-    Rect panel{pill.x + pill.w - kPanelW, pill.y + pill.h + 14 - 18 * (1 - a), kPanelW, h};
-    panel_rect_ = panel;
-    p.shadow(panel, kPanelRadius, 40, rgb(0x000000, 0.45f), a);
-    p.glass(panel, kPanelRadius, rgb(0x0b1016, 0.45f), a);
-
-    float hy = panel.y + kPanelPad + input_highlight_.x * kInputRowH;
-    Rect highlight{panel.x + kPanelPad, hy, panel.w - 2 * kPanelPad, kInputRowH};
-    p.fill(highlight, kPanelRadius - kPanelPad, rgb(0xffffff), rgb(0xffffff), a);
-
-    for (size_t i = 0; i < input_rows_.size(); i++) {
-        const InputRow &row = input_rows_[i];
-        float y = panel.y + kPanelPad + i * kInputRowH;
-        // How much the highlight covers this row: text turns dark under it.
-        float lit = std::clamp(1 - std::abs(input_highlight_.x - float(i)), 0.f, 1.f);
-        Color text = {1 - 0.9f * lit, 1 - 0.9f * lit, 1 - 0.88f * lit, 1};
-
-        Rect dot{panel.x + kPanelPad + 26, y + (kInputRowH - 12) / 2, 12, 12};
-        p.fill(dot, 6, rgb(row.input.connected ? 0x30d158 : 0x8e8e93), rgb(row.input.connected ? 0x30d158 : 0x8e8e93), a);
-        float x = dot.x + dot.w + 18;
-        p.text(std::round(x), std::round(y + (kInputRowH - row.name.h) / 2), row.name, text, a);
-        if (row.port.id) {
-            Color dim = {text.r, text.g, text.b, 0.6f};
-            p.text(std::round(panel.x + panel.w - kPanelPad - 26 - row.port.w),
-                   std::round(y + (kInputRowH - row.port.h) / 2), row.port, dim, a);
-        }
+    // Menus over everything, with the screen dimmed behind them.
+    float dim = std::max(std::clamp(inputs_menu_.anim.x, 0.f, 1.f), std::clamp(tile_menu_.anim.x, 0.f, 1.f));
+    if (dim > 0.01f) {
+        p.fill(screen, 0, rgb(0x000000, 0.30f), rgb(0x000000, 0.30f), dim);
+        // The tile being edited stays bright above the dimming.
+        if (tile_menu_.anim.x > 0.01f && focused >= 0) draw_tile(p, focused);
+    }
+    draw_menu(p, inputs_menu_, pill.x + pill.w - kInputsW, pill.y + pill.h + 14, kInputsW, 1);
+    if (focused >= 0) {
+        // Below the tile, or above it when there's no room.
+        Rect t{tiles_[focused].x.x, tiles_[focused].y.x - scroll_.x, kTileW, kTileH};
+        float mh = 2 * kMenuPad + tile_menu_.rows.size() * kMenuRowH;
+        int row, col;
+        index_to_slot(focused, &row, &col);
+        float my = t.y + t.h + (row >= 1 ? 72 : 28);  // clear of the caption in the grid
+        if (my + mh > h_ - 20) my = t.y - 28 - mh;
+        draw_menu(p, tile_menu_, t.x, my, kTileMenuW, 1);
     }
 }

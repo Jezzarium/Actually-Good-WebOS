@@ -46,6 +46,8 @@ public:
 
     // The blurred wallpaper that glass shows through.
     void set_backdrop(const Texture &blurred) { backdrop_ = blurred; }
+    // Rotates everything drawn after it about each shape's centre, until reset to 0.
+    void set_rotation(float radians);
 
     void fill(Rect r, float radius, Color top, Color bottom, float opacity = 1);
     // A soft white highlight centred at (sx, sy), in 0..1 of the rect, drawn
@@ -66,6 +68,7 @@ private:
 
     GLuint program_ = 0;
     GLint u_quad_, u_rect_, u_screen_, u_radius_, u_mode_, u_c0_, u_c1_, u_tex_, u_opacity_,
-        u_blur_, u_shine_;
+        u_blur_, u_shine_, u_angle_;
+    float angle_ = 0;
     Texture backdrop_;
 };

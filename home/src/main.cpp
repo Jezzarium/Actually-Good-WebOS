@@ -21,17 +21,23 @@ namespace {
 
 const char *kAppId = "com.lgtvtweaks.home";
 const char *kAppManager = "luna://com.webos.applicationManager/";
+const int kScancodePlay = 450;  // LG remote's Play: not in SDL_webOS.h
 
 // The app manager runs developer apps chrooted in /var/palm/jail/<id>, where
-// other apps' folders (and so their icons) don't exist. The jail's mounts live
-// in the TV's main mount table, so ask the Homebrew Channel's root exec
-// service to bind them in read-only. Idempotent; gone at reboot.
+// other apps' folders (and so their icons) don't exist, and nothing outside
+// /tmp is writable. The jail's mounts live in the TV's main mount table, so
+// ask the Homebrew Channel's root exec service to bind the app folders in
+// read-only, and kDataDir (owned by the jail user) read-write. Idempotent;
+// gone at reboot.
+const char *kDataDir = "/var/lib/lgtv-home";
 const char *kJailMounts =
-    "J=/var/palm/jail/com.lgtvtweaks.home; "
+    "J=/var/palm/jail/com.lgtvtweaks.home; D=/var/lib/lgtv-home; "
     "for d in /media/cryptofs/apps/usr/palm/applications /mnt/otncabi/usr/palm/applications "
     "/usr/palm/applications; do "
     "mkdir -p $J$d && { grep -q \" $J$d \" /proc/mounts || "
-    "{ mount --bind $d $J$d && mount -o remount,bind,ro $J$d; }; }; done";
+    "{ mount --bind $d $J$d && mount -o remount,bind,ro $J$d; }; }; done; "
+    "mkdir -p $D $J$D && chown 6067:5000 $D && "  // the jail's prisoner:jailer
+    "{ grep -q \" $J$D \" /proc/mounts || mount --bind $D $J$D; }";
 
 #ifdef HOME_WEBOS
 const char *kFont = "/usr/share/fonts/LG_Smart_UI-SemiBold.ttf";
@@ -127,10 +133,11 @@ int main(int argc, char **argv) {
         json_object *exec = json_object_new_object();
         json_object_object_add(exec, "command", json_object_new_string(kJailMounts));
         luna.call("luna://org.webosbrew.hbchannel.service/exec", json_object_to_json_string(exec),
-                  [list_apps](json_object *reply) {
+                  [list_apps, &home](json_object *reply) {
                       if (!get_bool(reply, "returnValue")) {
                           LOG("home: jail mounts: %s", json_object_to_json_string(reply));
                       }
+                      home.set_layout_path(std::string(kDataDir) + "/layout.json");
                       list_apps();
                   });
         json_object_put(exec);
@@ -154,6 +161,7 @@ int main(int argc, char **argv) {
         };
     } else {
         LOG("home: no Luna bus, showing placeholder apps");
+        home.set_layout_path("/tmp/lgtv-home-layout.json");
     }
 
     Uint64 last = SDL_GetPerformanceCounter(), stats_start = last;
@@ -163,19 +171,31 @@ int main(int argc, char **argv) {
         luna.pump();
         for (SDL_Event e; SDL_PollEvent(&e);) {
             if (e.type == SDL_QUIT) running = false;
-            if (e.type == SDL_KEYDOWN) {
+            if (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) {
                 SDL_Keycode key = e.key.keysym.sym;
+                int scancode = e.key.keysym.scancode;
 #ifdef HOME_WEBOS
                 // LG's remote keys have scancodes but no keycode.
-                int scancode = e.key.keysym.scancode;
                 if (scancode == SDL_WEBOS_SCANCODE_BACK || scancode == SDL_WEBOS_SCANCODE_EXIT) key = SDLK_AC_BACK;
+                if (scancode == SDL_WEBOS_SCANCODE_CURSOR_HIDE) {
+                    if (e.type == SDL_KEYDOWN) home.pointer_hidden();
+                    continue;
+                }
+                if (scancode == SDL_WEBOS_SCANCODE_CURSOR_SHOW) continue;
 #endif
-                home.key(key);
+                // Play/Pause on a tile opens its menu, as on tvOS.
+                if (scancode == kScancodePlay || scancode == SDL_SCANCODE_PAUSE) {
+                    if (e.type == SDL_KEYDOWN && !e.key.repeat) home.options();
+                    continue;
+                }
+                if (e.type == SDL_KEYDOWN) home.key_down(key, e.key.repeat);
+                else home.key_up(key);
             }
             if (e.type == SDL_MOUSEMOTION) home.pointer_move(float(e.motion.x), float(e.motion.y));
-            if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
+            if ((e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP) && e.button.button == SDL_BUTTON_LEFT) {
                 home.pointer_move(float(e.button.x), float(e.button.y));
-                home.pointer_click();
+                if (e.type == SDL_MOUSEBUTTONDOWN) home.pointer_down();
+                else home.pointer_up();
             }
             if (e.type == SDL_MOUSEWHEEL && e.wheel.y) home.wheel(e.wheel.y);
         }

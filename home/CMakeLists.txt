@@ -27,6 +27,7 @@ add_executable(home
   src/gfx.cpp
   src/home.cpp
   src/icons.cpp
+  src/layout.cpp
   src/luna.cpp
   src/main.cpp
   src/wallpaper.cpp

@@ -9,11 +9,15 @@ attribute vec2 a_pos;      // unit quad, 0..1
 uniform vec4 u_quad;       // geometry drawn, pixels
 uniform vec4 u_rect;       // the shape, pixels (larger quad for shadows)
 uniform vec2 u_screen;
+uniform float u_angle;     // rotation about the shape's centre, radians
 varying vec2 v_px;         // position relative to the shape's top-left
 varying vec2 v_screen;     // position on screen
 void main() {
     vec2 p = u_quad.xy + a_pos * u_quad.zw;
     v_px = p - u_rect.xy;
+    vec2 c = u_rect.xy + u_rect.zw * 0.5;
+    float s = sin(u_angle), k = cos(u_angle);
+    p = c + mat2(k, s, -s, k) * (p - c);
     v_screen = p;
     vec2 ndc = p / u_screen * 2.0 - 1.0;
     gl_Position = vec4(ndc.x, -ndc.y, 0.0, 1.0);
@@ -146,6 +150,7 @@ bool Painter::init(int screen_w, int screen_h) {
     u_opacity_ = glGetUniformLocation(program_, "u_opacity");
     u_blur_ = glGetUniformLocation(program_, "u_blur");
     u_shine_ = glGetUniformLocation(program_, "u_shine");
+    u_angle_ = glGetUniformLocation(program_, "u_angle");
 
     static const float verts[] = {0, 0, 1, 0, 0, 1, 1, 1};
     GLuint vbo;
@@ -178,6 +183,10 @@ void Painter::draw(Mode mode, Rect quad, Rect shape, float radius, Color c0, Col
     glUniform3f(u_shine_, sx, sy, shine);
     if (texture) glBindTexture(GL_TEXTURE_2D, texture);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+}
+
+void Painter::set_rotation(float radians) {
+    if (radians != angle_) glUniform1f(u_angle_, angle_ = radians);
 }
 
 void Painter::fill(Rect r, float radius, Color top, Color bottom, float opacity) {
