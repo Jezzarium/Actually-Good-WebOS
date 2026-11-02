@@ -1,17 +1,25 @@
 #!/bin/sh
-# Route the remote's Settings key to Quick Settings (com.lgtvtweaks.settings) by
-# inserting /var/lib/lgtv-tweaks/settingskey.js into surface-manager's key filter
-# list, just before LG's handleHotkeys. configd keeps setConfigs changes only
-# until reboot, so this re-applies it at boot. It also preloads the app hidden,
-# so the first press only has to show an already-loaded page.
+# Route the remote's Settings key to the Control Center (com.lgtvtweaks.control)
+# by inserting /var/lib/lgtv-tweaks/settingskey.js into surface-manager's key
+# filter list, just before LG's handleHotkeys. configd keeps setConfigs changes
+# only until reboot, so this re-applies it at boot.
+# It also keeps the Control Center loaded, hidden: SAM closes it whenever an app
+# is launched, so after every foreground change it is reloaded with
+# {"hidden": true} if it isn't running, and the next Settings press only has to
+# show it.
 # Installed to /var/lib/webosbrew/init.d/. Undo: rm this script and reboot, or
 # setConfigs with the saved original list (tv/keyFilters_before.json in the repo).
 
-APP=com.lgtvtweaks.settings
+APP=com.lgtvtweaks.control
 HANDLER=/var/lib/lgtv-tweaks/settingskey.js
 NAME=com.webos.surfacemanager.keyFilters
+PIDFILE=/tmp/settings-key.pid
+# The app ignores a relaunch that comes this soon after the marker (one that
+# reaches a copy still running), so a reload can never open it.
+MARKER=/tmp/lgtv-control.preload
 
 [ -f "$HANDLER" ] || exit 0
+[ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null && exit 0
 
 insert_handler() {
     cur=$(luna-send -n 1 luna://com.webos.service.config/getConfigs \
@@ -28,6 +36,14 @@ insert_handler() {
     return 1
 }
 
+preload() {
+    luna-send -n 1 luna://com.webos.applicationManager/running '{}' </dev/null 2>/dev/null |
+        grep -q "\"id\":\"$APP\"" && return 0
+    touch "$MARKER"
+    luna-send -n 1 luna://com.webos.applicationManager/launch \
+        "{\"id\":\"$APP\",\"params\":{\"hidden\":true}}" </dev/null >/dev/null 2>&1
+}
+
 (
     # configd may not be up yet; retry for ~2 minutes.
     for i in $(seq 1 24); do
@@ -35,7 +51,19 @@ insert_handler() {
         sleep 5
     done
     # Let the boot-time app launches settle before loading ours in the background.
-    sleep 30
-    luna-send -n 1 luna://com.webos.applicationManager/launch \
-        "{\"id\":\"$APP\",\"preload\":\"full\",\"keepAlive\":true}" </dev/null >/dev/null 2>&1
+    [ -n "$NO_BOOT_WAIT" ] || sleep 30
+    preload
+    while :; do
+        # extraInfo: overlays too, such as LG's settings opening over an app.
+        luna-send -i luna://com.webos.applicationManager/getForegroundAppInfo '{"subscribe":true,"extraInfo":true}' \
+            </dev/null 2>/dev/null |
+        while read -r line; do
+            case "$line" in *'"appId"'*) ;; *) continue ;; esac
+            # SAM closes the Control Center a moment after another app opens.
+            sleep 3
+            preload
+        done
+        sleep 5
+    done
 ) </dev/null >/dev/null 2>&1 &
+echo $! > "$PIDFILE"

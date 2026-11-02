@@ -2,7 +2,8 @@
 # Undo tv/install.sh, from this machine: tv/uninstall.sh
 #
 # Gives the Home button, power-on and the Settings key back to LG, removes the
-# boot scripts and both apps. The home screen's layout and wallpapers in
+# boot scripts and both apps (and the web Quick Settings, if an older install
+# left it). The home screen's layout and wallpapers in
 # /var/lib/lgtv-home stay, for a reinstall, unless --purge.
 #
 #   --purge  also delete /var/lib/lgtv-home
@@ -11,7 +12,8 @@ set -e
 cd "$(dirname "$0")/.."
 HOST=${LGTV_HOST:-lgtv}
 HOME_ID=com.lgtvtweaks.home
-SETTINGS_ID=com.lgtvtweaks.settings
+CONTROL_ID=com.lgtvtweaks.control
+OLD_SETTINGS_ID=com.lgtvtweaks.settings
 purge=
 for arg; do
     case "$arg" in
@@ -70,7 +72,7 @@ new=$(without com.webos.applicationManager.keepAliveApps "e == '$HOME_ID'")
 
 step "removing the apps"
 luna luna://com.webos.applicationManager/launch '{"id":"com.webos.app.home"}'
-for id in $HOME_ID $SETTINGS_ID; do
+for id in $HOME_ID $CONTROL_ID $OLD_SETTINGS_ID; do
     luna luna://com.webos.applicationManager/closeByAppId "{\"id\":\"$id\"}" >/dev/null || true
 done
 # Home bind-mounts other apps' folders and /var/lib/lgtv-home into its jail
@@ -92,7 +94,8 @@ for d in /var/lib/lgtv-home /media/cryptofs/apps/usr/palm/applications /mnt/otnc
     done
     if grep -q " $J$d[ /]" /proc/mounts; then echo "cannot unmount $J$d" >&2; exit 1; fi
 done'
-for id in $HOME_ID $SETTINGS_ID; do
+for id in $HOME_ID $CONTROL_ID $OLD_SETTINGS_ID; do
+    tv "[ -d /media/developer/apps/usr/palm/applications/$id ]" || continue
     luna luna://com.webos.appInstallService/dev/remove "{\"id\":\"$id\"}"
     echo
     # dev/remove only starts the removal; wait for the app's folder to go.

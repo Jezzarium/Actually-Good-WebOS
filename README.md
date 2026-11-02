@@ -1,6 +1,6 @@
 # Actually Good WebOS
 
-WebOS's default app launcher sucks. I decided to blatantly copy Apple's tvOS home screen and make an actually good app launcher. This also includes an improved settings overlay. It's way faster than WebOS's default menu and actually looks good. 
+WebOS's default app launcher sucks. I decided to blatantly copy Apple's tvOS home screen and make an actually good app launcher. This also includes a Control Center for the settings you change most. It's way faster than WebOS's default menu and actually looks good. 
 
 ![The home screen: moving along the dock, then switching the wallpaper in Home Settings](docs/demofinal.gif)
 
@@ -24,7 +24,7 @@ Host lgtv
     IdentitiesOnly yes
 ```
 
-You also need the toolchain for the home screen (see [Home screen](#home-screen-home)). Then:
+You also need the toolchain for the native apps (see [Home screen](#home-screen-home)). Then:
 
 ```sh
 tv/install.sh                  # build and install both apps, make Home the TV's home, add the boot scripts
@@ -38,43 +38,37 @@ Running `install.sh` again updates the apps; `--no-build` installs the packages 
 
 | Folder | What it is |
 |---|---|
-| [`settings/`](settings) | **Quick Settings**: a replacement for LG's settings panel, opened by the remote's Settings button |
-| [`tv/`](tv) | `install.sh` and `uninstall.sh`, and the scripts they put on the TV (boot hooks, the Settings-button handler) |
+| [`control/`](control) | **Control Center**: picture, sound and power settings in a small panel over whatever is playing, opened by the remote's Settings button or from Home; native C++ like Home |
 | [`home/`](home) | **Home**: a tvOS-style home screen and the TV's default Home app, native C++ with SDL2 and OpenGL ES |
+| [`common/`](common) | Code both native apps share: drawing, the Luna bus, the build and packaging script |
+| [`tv/`](tv) | `install.sh` and `uninstall.sh`, and the scripts they put on the TV (boot hooks, the Settings-button handler) |
 
-## Quick Settings (`settings/`)
+## Control Center (`control/`)
 
-An overlay panel on the right of the screen, drawn over whatever is playing.
+A compact glass panel in the top-right corner, in the home screen's design (it drops from where
+Home's status pill ends), drawn over whatever is playing.
 
 - **Brightness first:** it opens with Brightness focused (LG's "OLED Pixel Brightness", the `backlight` key), so Left/Right changes it immediately.
-- **Quick panel:** picture mode, eye comfort, sound mode, sound output, sleep timer, energy saving, screen off.
-- **More settings:** grouped pages for Picture, Sound, OLED care & power, General and Accessibility, plus **All LG settings** as a fallback.
-- **Fast:** plain JavaScript, no framework, about 40 KB of page code. It is preloaded at boot and hides instead of closing, so it opens in about 45 ms (a cold start of a web app takes about 0.8 s).
-- **Light on the GPU:** no blur, no large shadows; only `transform` and `opacity` animate.
+- **Quick settings:** picture mode, eye comfort, sound mode, sound output, sleep timer, energy saving; then Screen off, More and All settings.
+- **More settings:** grouped pages for Picture, Sound, OLED care & power, General and Accessibility, each with **Open in LG settings** where LG has a page for it.
+- **Bluetooth:** Sound out has a **Bluetooth devices** page: paired headphones and speakers (OK connects and sends the sound there, OK again disconnects, Play forgets one) and **Search for devices** to pair new ones.
+- **Remote:** the Settings button opens and closes it; so does the middle button of Home's pill. Back goes up a page, or closes it.
+- **Fast:** it stays loaded and hides by moving its window off screen, so it shows about 0.1–0.25 s after the press, against about 0.4 s for the web version, and holds 60 fps (the web version ran near 48 fps with 200 ms hitches). See [`control/README.md`](control/README.md) for how it gets an overlay window from LG's SDL, and what that costs.
 
-Settings are read and written through `luna://com.webos.settingsservice` exactly as LG's own app does. Allowed values come from `getSystemSettingDesc` on the TV, so the lists match the model and the current signal. Calls a developer app isn't allowed to make (sleep timer, screen off) go through the Homebrew Channel's root `exec` service.
-
-```sh
-cd settings
-./build.py            # build/com.lgtvtweaks.settings_<version>_all.ipk
-./build.py --card     # full-screen variant, if the overlay window is ever refused
-```
-
-Preview in a desktop browser with fake TV services: open `settings/preview/index.html` in Chromium.
-
-Install on the TV (from this machine, with `ssh lgtv` set up as root):
+Settings are read and written through `luna://com.webos.settingsservice` exactly as LG's own app does. Allowed values come from `getSystemSettingDesc` on the TV, so the lists match the model and the current signal. Calls a developer app isn't allowed to make (sleep timer, screen off, Bluetooth) go through the Homebrew Channel's root `exec` service.
 
 ```sh
-ssh lgtv 'cat > /tmp/qs.ipk && luna-send -n 1 luna://com.webos.appInstallService/dev/install \
-  "{\"id\":\"com.lgtvtweaks.settings\",\"ipkUrl\":\"/tmp/qs.ipk\"}" </dev/null' \
-  < settings/build/com.lgtvtweaks.settings_*_all.ipk
+cd control
+./build.py            # build/com.lgtvtweaks.control_<version>_all.ipk (needs the toolchain, as Home does)
+tools/install.sh      # install that package on the TV
+tools/shot.sh out.png DOWN ENTER   # press remote keys, then capture the screen
 ```
 
 ## Home screen (`home/`)
 
 A tvOS-style home screen and the TV's default Home app: wallpaper, a glass dock of six favourites,
-all other apps in a grid below, and a status pill with the clock, an **Inputs** button and a
-settings button. Native C++ with SDL2 and OpenGL ES 2, linked against the TV's own libraries: a
+all other apps in a grid below, and a status pill with the clock, an **Inputs** button, the
+**Control Center** and a settings button. Native C++ with SDL2 and OpenGL ES 2, linked against the TV's own libraries: a
 steady 60 fps and about 50 MB of memory. It is on the app manager's keep-alive list, so the Home
 button brings it back in about 50 ms.
 
@@ -82,6 +76,7 @@ button brings it back in about 50 ms.
   **Hide** it; while moving, the arrows carry it and OK or Back drops it. Back in the grid returns
   to the dock.
 - **Magic Remote:** pointing focuses, clicking opens, the wheel scrolls a row at a time.
+- **Control Center** (the switches in the pill): opens the panel described above, over Home.
 - **Home Settings** (the gear in the corner): wallpaper (Left/Right to switch, previewed live),
   appearance (night dims the wallpaper; automatic from 7 PM to 7 AM, always day, always night), show
   hidden apps, reset layout.
@@ -134,7 +129,7 @@ Copied to `/var/lib/webosbrew/init.d/` on the TV, where the Homebrew Channel run
 
 | Script | What it does |
 |---|---|
-| `settings-key` + `settingskey.js` | Adds a key handler to surface-manager (`com.webos.surfacemanager.keyFilters`) so the Settings button opens Quick Settings, and preloads the app hidden. No system files are patched. |
+| `settings-key` + `settingskey.js` | Adds a key handler to surface-manager (`com.webos.surfacemanager.keyFilters`) so the Settings button opens the Control Center, and keeps that app loaded and hidden: the app manager closes it whenever another app opens, so it is reloaded after every app switch. No system files are patched. |
 | `default-home` | Opens the default Home app at power-on if the TV didn't (see [Home screen](#home-screen-home)) and keeps LG's home out of memory while something else is the default. |
 | `trim-preloads` | Stops LG's preload manager keeping unused apps (browser, voice, Prime Video, Netflix, Live TV, LG Channels) in memory, at boot and after every wake. |
 

@@ -1,20 +1,22 @@
 #!/bin/sh
-# Install the home screen and Quick Settings on a rooted TV (Homebrew Channel and
-# its SSH server), from this machine: tv/install.sh
+# Install the home screen and the Control Center on a rooted TV (Homebrew Channel
+# and its SSH server), from this machine: tv/install.sh
 #
 # Builds both apps, installs them, makes Home the TV's home (Home button and
-# power-on), keeps it resident, sends the Settings key to Quick Settings and
+# power-on), keeps it resident, sends the Settings key to the Control Center and
 # installs the boot scripts that re-apply what LG resets. Safe to run again,
-# e.g. to update the apps. Undo with tv/uninstall.sh.
+# e.g. to update the apps. Removes the web Quick Settings (an earlier version) the
+# Control Center replaces. Undo with tv/uninstall.sh.
 #
 #   --trim-preloads  also install tv/trim-preloads (stops LG preloading unused apps)
-#   --no-build       install the .ipk files already in home/build and settings/build
+#   --no-build       install the .ipk files already in home/build and control/build
 # Environment: LGTV_HOST, the ssh host of the TV (default lgtv, logged in as root).
 set -e
 cd "$(dirname "$0")/.."
 HOST=${LGTV_HOST:-lgtv}
 HOME_ID=com.lgtvtweaks.home
-SETTINGS_ID=com.lgtvtweaks.settings
+CONTROL_ID=com.lgtvtweaks.control
+OLD_SETTINGS_ID=com.lgtvtweaks.settings  # the web Quick Settings
 build=1 trim=
 for arg; do
     case "$arg" in
@@ -34,12 +36,12 @@ KILLTREE='killtree() { for c in $(pgrep -P "$1"); do killtree "$c"; done; kill "
 if [ -n "$build" ]; then
     step building
     home/build.py
-    settings/build.py
+    control/build.py
 fi
 # The newest package of each app.
 ipk() { ls -t "$1"/build/"$2"_*_all.ipk 2>/dev/null | head -1; }
-for pkg in "$(ipk home $HOME_ID)" "$(ipk settings $SETTINGS_ID)"; do
-    [ -f "$pkg" ] || { echo "no package in home/build or settings/build; run without --no-build" >&2; exit 1; }
+for pkg in "$(ipk home $HOME_ID)" "$(ipk control $CONTROL_ID)"; do
+    [ -f "$pkg" ] || { echo "no package in home/build or control/build; run without --no-build" >&2; exit 1; }
 done
 
 # A jail left empty by an earlier uninstall (see tv/uninstall.sh): clear it, so
@@ -48,7 +50,7 @@ done
 tv 'J=/var/palm/jail/com.lgtvtweaks.home
 [ -d $J ] && [ ! -e $J/bin ] && ! grep -q " $J/" /proc/mounts && find $J -depth -type d -exec rmdir {} \; 2>/dev/null; true'
 
-for app in "home $HOME_ID" "settings $SETTINGS_ID"; do
+for app in "home $HOME_ID" "control $CONTROL_ID"; do
     set -- $app
     pkg=$(ipk "$1" "$2")
     step "installing $(basename "$pkg")"
@@ -67,6 +69,13 @@ for app in "home $HOME_ID" "settings $SETTINGS_ID"; do
         kill \$pid 2>/dev/null; rm -f \$P
         [ -n \"\$ok\" ] && { echo installed; rm -f \$L; } || { echo 'install failed:'; tail -2 \$L; exit 1; }" < "$pkg"
 done
+
+if tv "[ -d /media/developer/apps/usr/palm/applications/$OLD_SETTINGS_ID ]"; then
+    step "removing the web Quick Settings"
+    luna luna://com.webos.applicationManager/closeByAppId "{\"id\":\"$OLD_SETTINGS_ID\"}" >/dev/null || true
+    luna luna://com.webos.appInstallService/dev/remove "{\"id\":\"$OLD_SETTINGS_ID\"}"
+    echo
+fi
 
 step "boot scripts"
 scripts="settings-key default-home"
@@ -98,10 +107,11 @@ if [ -n "$new" ]; then luna luna://com.webos.service.config/setConfigs "$new"; e
 step "starting the boot scripts"
 # Stop a copy already running (with its children: its luna-send subscription and
 # the loop reading it), so an update takes effect. NO_BOOT_OPEN: the TV is in
-# use, so default-home only keeps LG Home out of memory instead of opening Home.
+# use, so default-home only keeps LG Home out of memory instead of opening Home;
+# NO_BOOT_WAIT: settings-key loads the Control Center now, not after boot settles.
 for s in $scripts; do
     tv "$KILLTREE; [ -f /tmp/$s.pid ] && killtree \$(cat /tmp/$s.pid) 2>/dev/null; rm -f /tmp/$s.pid
-        NO_BOOT_OPEN=1 /var/lib/webosbrew/init.d/$s </dev/null >/dev/null 2>&1"
+        NO_BOOT_OPEN=1 NO_BOOT_WAIT=1 /var/lib/webosbrew/init.d/$s </dev/null >/dev/null 2>&1"
 done
 luna luna://com.webos.applicationManager/launch "{\"id\":\"$HOME_ID\"}"
 echo
