@@ -42,6 +42,11 @@ for pkg in "$(ipk home $HOME_ID)" "$(ipk settings $SETTINGS_ID)"; do
     [ -f "$pkg" ] || { echo "no package in home/build or settings/build; run without --no-build" >&2; exit 1; }
 done
 
+# A jail left empty by an earlier uninstall: the jailer would reuse it instead of
+# setting it up, and Home would start in an empty folder (see tv/uninstall.sh).
+tv 'J=/var/palm/jail/com.lgtvtweaks.home
+if [ -d $J ] && [ ! -e $J/bin ] && ! grep -q " $J/" /proc/mounts; then rm -rf $J; fi'
+
 for app in "home $HOME_ID" "settings $SETTINGS_ID"; do
     set -- $app
     pkg=$(ipk "$1" "$2")
