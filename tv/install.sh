@@ -42,8 +42,8 @@ for pkg in "$(ipk home $HOME_ID)" "$(ipk settings $SETTINGS_ID)"; do
     [ -f "$pkg" ] || { echo "no package in home/build or settings/build; run without --no-build" >&2; exit 1; }
 done
 
-# A jail left empty by an earlier uninstall: the jailer would reuse it instead of
-# setting it up, and Home would start in an empty folder (see tv/uninstall.sh).
+# A jail left empty by an earlier uninstall (see tv/uninstall.sh): clear it, so
+# the jailer sets it up from scratch.
 tv 'J=/var/palm/jail/com.lgtvtweaks.home
 if [ -d $J ] && [ ! -e $J/bin ] && ! grep -q " $J/" /proc/mounts; then rm -rf $J; fi'
 
@@ -51,9 +51,20 @@ for app in "home $HOME_ID" "settings $SETTINGS_ID"; do
     set -- $app
     pkg=$(ipk "$1" "$2")
     step "installing $(basename "$pkg")"
-    tv "cat > /tmp/$2.ipk && luna-send -n 1 luna://com.webos.appInstallService/dev/install \
-        '{\"id\":\"$2\",\"ipkUrl\":\"/tmp/$2.ipk\"}' </dev/null; rm -f /tmp/$2.ipk" < "$pkg"
-    echo
+    # dev/install only starts the install; follow its status until it's done,
+    # and keep the package until then.
+    tv "P=/tmp/$2.ipk L=/tmp/$2.install.log
+        cat > \$P || exit 1
+        luna-send -i luna://com.webos.appInstallService/dev/install \
+            '{\"id\":\"$2\",\"ipkUrl\":\"/tmp/$2.ipk\",\"subscribe\":true}' </dev/null >\$L 2>&1 &
+        pid=\$! ok=
+        for i in \$(seq 1 120); do
+            grep -q '\"state\":\"installed\"' \$L && { ok=1; break; }
+            grep -qE '\"state\":\"[^\"]*fail|\"returnValue\":false' \$L && break
+            sleep 1
+        done
+        kill \$pid 2>/dev/null; rm -f \$P
+        [ -n \"\$ok\" ] && { echo installed; rm -f \$L; } || { echo 'install failed:'; tail -2 \$L; exit 1; }" < "$pkg"
 done
 
 step "boot scripts"

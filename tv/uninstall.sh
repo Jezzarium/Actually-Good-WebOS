@@ -83,12 +83,14 @@ done'
 for id in $HOME_ID $SETTINGS_ID; do
     luna luna://com.webos.appInstallService/dev/remove "{\"id\":\"$id\"}"
     echo
+    # dev/remove only starts the removal; wait for the app's folder to go.
+    tv "for i in \$(seq 1 60); do [ -e /media/developer/apps/usr/palm/applications/$id ] || exit 0; sleep 1; done
+        echo 'still installed: $id' >&2; exit 1"
 done
 # Removing the app tears down the jail but leaves the empty mount points the
-# app made for its own mounts. The jailer only sets up a jail that doesn't
-# exist yet, so a reinstall would run in that empty folder: a black screen.
-# Delete it, once nothing is mounted in it.
-tv 'sleep 2; J=/var/palm/jail/com.lgtvtweaks.home
+# app made for its own mounts. Delete them, once nothing is mounted there, so a
+# reinstall gets a jail set up from scratch.
+tv 'J=/var/palm/jail/com.lgtvtweaks.home
 if [ -d $J ] && ! grep -q " $J/" /proc/mounts; then rm -rf $J; fi'
 
 if [ -n "$purge" ]; then
