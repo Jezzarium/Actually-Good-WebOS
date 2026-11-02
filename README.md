@@ -11,8 +11,20 @@ Built and tested on an LG OLED65C5PUA (webOS 10.3.1, Chromium 120 web engine), r
 
 ## Install
 
-With `ssh lgtv` logging in to the TV as root, and the toolchain for the home screen (see
-[Home screen](#home-screen-home)):
+The scripts reach the TV as `ssh lgtv`; they don't search the network. Give the TV a fixed
+address (a DHCP reservation on the router), enable SSH in the Homebrew Channel's settings, and
+add an entry to `~/.ssh/config` with a key the TV accepts (the public key goes in
+`/home/root/.ssh/authorized_keys` on the TV):
+
+```
+Host lgtv
+    HostName 192.168.1.47
+    User root
+    IdentityFile ~/.ssh/id_ed25519_lgtv
+    IdentitiesOnly yes
+```
+
+You also need the toolchain for the home screen (see [Home screen](#home-screen-home)). Then:
 
 ```sh
 tv/install.sh                  # build and install both apps, make Home the TV's home, add the boot scripts
