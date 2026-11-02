@@ -42,7 +42,8 @@ ssh lgtv 'cat > /tmp/qs.ipk && luna-send -n 1 luna://com.webos.appInstallService
 ## Home screen (`home/`)
 
 A tvOS-style home screen and the TV's default Home app: wallpaper, a glass dock of six favourites,
-all other apps in a grid below, and a status pill with the clock and an **Inputs** button. Native
+all other apps in a grid below, and a status pill with the clock, an **Inputs** button and a
+settings button. Native
 C++ with SDL2 and OpenGL ES 2, linked against the TV's own libraries; a steady 60 fps, about 20 MB
 of memory, and kept resident so the Home button brings it back instantly.
 
@@ -50,8 +51,9 @@ of memory, and kept resident so the Home button brings it back instantly.
   **Hide** it; while moving, the arrows carry it and OK or Back drops it. Back in the grid returns
   to the dock.
 - **Magic Remote:** pointing focuses, clicking opens, the wheel scrolls a row at a time.
-- **Home Settings** (the gear tile): wallpaper, night wallpaper, appearance (automatic night from
-  7 PM to 7 AM, always day, always night), show hidden apps, reset layout.
+- **Home Settings** (the gear in the corner): wallpaper and night wallpaper (Left/Right to switch,
+  previewed live), appearance (automatic night from 7 PM to 7 AM, always day, always night), show
+  hidden apps, reset layout.
 - **Your own wallpapers:** copy JPEGs (ideally 1920x1080) to `/var/lib/lgtv-home/wallpapers/` on
   the TV, then pick them in Home Settings. The layout and settings live in
   `/var/lib/lgtv-home/layout.json`.

@@ -46,11 +46,9 @@ constexpr float kWiggleAngle = 0.035f, kWiggleSpeed = 15;
 constexpr float kMenuPad = 12, kMenuRowH = 72, kMenuRadius = 30;
 constexpr float kInputsW = 480, kTileMenuW = 300, kSettingsW = 820, kMenuTitleH = 92;
 
-// The built-in tile that opens the settings sheet.
-const char *kSettingsId = "lgtvtweaks.home-settings";
 // Wallpapers: bundled in assets/wallpapers, plus any the user copies here.
 const char *kUserWallpapers = "/var/lib/lgtv-home/wallpapers";
-const char *kDefaultWallpaper = "default.jpg";
+const char *kDefaultWallpaper = "Beach.jpg";
 // Automatic appearance: night between these hours.
 constexpr int kNightFrom = 19, kNightTo = 7;
 
@@ -179,9 +177,15 @@ void Home::open_settings() {
 void Home::refresh_settings() {
     auto stem = [](const std::string &file) { return file.substr(0, file.rfind('.')); };
     std::string details[5];
-    details[0] = stem(layout_.wallpaper.empty() ? kDefaultWallpaper : layout_.wallpaper);
-    details[1] = layout_.night_wallpaper.empty() ? "Same, dimmed" : stem(layout_.night_wallpaper);
-    details[2] = layout_.appearance == "day" ? "Always day" : layout_.appearance == "night" ? "Always night" : "Automatic";
+    // Arrows on the rows Left/Right change.
+    auto choice = [](const std::string &value) { return "\u2039  " + value + "  \u203a"; };
+    details[0] = choice(stem(layout_.wallpaper.empty() ? kDefaultWallpaper : layout_.wallpaper));
+    details[1] = choice(layout_.night_wallpaper.empty() ? "Same, dimmed" : stem(layout_.night_wallpaper));
+    details[2] = choice(layout_.appearance == "day"     ? "Always day"
+                        : layout_.appearance == "night" ? "Always night"
+                                                        : "Automatic");
+    settings_.rows[0].thumb = wallpaper_.sharp;
+    settings_.rows[1].thumb = night_wallpaper_.sharp.id ? night_wallpaper_.sharp : wallpaper_.sharp;
     details[3] = layout_.hidden.empty() ? "None hidden" : std::to_string(layout_.hidden.size()) + " hidden";
     for (int i = 0; i < 5; i++) {
         destroy(settings_.rows[i].detail);
@@ -238,7 +242,6 @@ void Home::settings_key(SDL_Keycode key) {
 
 void Home::set_apps(const std::vector<App> &apps) {
     apps_ = apps;
-    apps_.push_back({kSettingsId, "Home Settings", assets_ + "/icons/settings.png", 0x5f6673});
     rebuild_tiles();
 }
 
@@ -316,7 +319,7 @@ int Home::row_count() const {
 }
 
 int Home::row_length(int row) const {
-    if (row == kPill) return 1;
+    if (row == kPill) return 2;
     if (row == 0) return dock_count();
     int first = dock_count() + (row - 1) * kCols;
     return std::clamp(int(tiles_.size()) - first, 0, kCols);
@@ -387,7 +390,7 @@ void Home::move_focus(int row, int col, int dx, int dy, bool scroll) {
 
     for (Tile &t : tiles_) t.focus.target = 0;
     if (row != kPill) tiles_[tile_index(row, col)].focus.target = 1;
-    pill_focus_.target = row == kPill ? 1 : 0;
+    for (int i = 0; i < 2; i++) pill_focus_[i].target = row == kPill && col == i ? 1 : 0;
 
     if (!scroll) return;
     // The first grid row rises to y 300; later rows keep the focused row in view.
@@ -444,9 +447,6 @@ void Home::press(SDL_Keycode key) {
             if (tile_menu_.focus == 0) {
                 moving_ = true;
                 wiggle_.target = 1;
-            } else if (row_ != kPill && tiles_[tile_index(row_, col_)].app.id == kSettingsId) {
-                // Never hidden: it's the way back to "Show hidden apps".
-                tiles_[tile_index(row_, col_)].lean_x.v += 9;
             } else if (row_ != kPill) {
                 layout_.hidden.push_back(tiles_[tile_index(row_, col_)].app.id);
                 tiles_.erase(tiles_.begin() + tile_index(row_, col_));
@@ -482,10 +482,10 @@ void Home::press(SDL_Keycode key) {
 }
 
 void Home::activate() {
-    if (row_ == kPill) {
-        if (!inputs_menu_.rows.empty()) inputs_menu_.show();
-    } else if (tiles_[tile_index(row_, col_)].app.id == kSettingsId) {
+    if (row_ == kPill && col_ == 1) {
         open_settings();
+    } else if (row_ == kPill) {
+        if (!inputs_menu_.rows.empty()) inputs_menu_.show();
     } else if (on_launch) {
         on_launch(tiles_[tile_index(row_, col_)].app.id);
     }
@@ -563,8 +563,9 @@ void Home::pointer_move(float x, float y) {
     if (inputs_menu_.open) return menu_pointer(inputs_menu_, x, y);
     if (moving_) return;
     int row, col;
-    if (inside(button_rect_, x, y) && grid_.x < 0.5f) {
-        if (row_ != kPill) move_focus(kPill, 0, 0, 0, false);
+    if (grid_.x < 0.5f && (inside(button_rect_[0], x, y) || inside(button_rect_[1], x, y))) {
+        int which = inside(button_rect_[1], x, y) ? 1 : 0;
+        if (row_ != kPill || col_ != which) move_focus(kPill, which, 0, 0, false);
     } else if (hit_tile(x, y, &row, &col) && (row != row_ || col != col_)) {
         move_focus(row, col, 0, 0, false);
     }
@@ -596,7 +597,7 @@ void Home::pointer_up() {
     }
     if (moving_) return press(SDLK_RETURN);  // drop
     int row, col;
-    bool on_button = inside(button_rect_, px_, py_) && row_ == kPill;
+    bool on_button = row_ == kPill && inside(button_rect_[col_], px_, py_);
     bool on_tile = hit_tile(px_, py_, &row, &col) && row == row_ && col == col_;
     if (on_button || on_tile) activate();
 }
@@ -689,10 +690,16 @@ void Home::draw_menu(Painter &p, Menu &m, float x, float y, float width, float a
             tx += dot.w + 18;
         }
         p.text(std::round(tx), std::round(ry + (kMenuRowH - row.label.h) / 2), row.label, text, a);
+        float right = panel.x + panel.w - kMenuPad - 26;
+        if (row.thumb.id) {
+            Rect thumb{right - 96, ry + (kMenuRowH - 54) / 2, 96, 54};
+            p.image(thumb, 8, row.thumb, {1, 1, 1, 1}, a);
+            right = thumb.x - 18;
+        }
         if (row.detail.id) {
             Color dim = {text.r, text.g, text.b, 0.6f};
-            p.text(std::round(panel.x + panel.w - kMenuPad - 26 - row.detail.w),
-                   std::round(ry + (kMenuRowH - row.detail.h) / 2), row.detail, dim, a);
+            p.text(std::round(right - row.detail.w), std::round(ry + (kMenuRowH - row.detail.h) / 2), row.detail,
+                   dim, a);
         }
     }
 }
@@ -757,7 +764,7 @@ void Home::update(float dt) {
         t.lean_x.step(dt, kLeanStiffness, kLeanDamping);
         t.lean_y.step(dt, kLeanStiffness, kLeanDamping);
     }
-    pill_focus_.step(dt, kFocusStiffness, kFocusDamping);
+    for (Spring &s : pill_focus_) s.step(dt, kFocusStiffness, kFocusDamping);
     for (Menu *m : {&inputs_menu_, &tile_menu_, &settings_}) {
         m->anim.step(dt, kFocusStiffness, kFocusDamping);
         m->highlight.step(dt, kFocusStiffness, kFocusDamping);
@@ -855,25 +862,38 @@ void Home::render(Painter &p) {
     }
     if (focused >= 0) draw_tile(p, focused);
 
-    // Status pill: clock and the Inputs button, fading out in the grid.
-    float pf = std::max(0.f, pill_focus_.x), alpha = 1 - g;
-    float pad = 26, gap = 22, height = 64;
-    Rect button{0, 0, inputs_label_.w + 2 * pad, height - 12};
-    float width = pad + clock_.w + gap + button.w + 6;
+    // Status pill: clock, the Inputs button and the settings button, fading
+    // out in the grid.
+    float alpha = 1 - g;
+    float pad = 26, gap = 22, height = 64, bh = height - 12;
+    Rect inputs_button{0, 0, inputs_label_.w + 2 * pad, bh}, gear_button{0, 0, bh, bh};
+    float width = pad + clock_.w + gap + inputs_button.w + 6 + gear_button.w + 6;
     Rect pill{1920 - kLeft + kDockPad - width, 64, width, height};
-    button.x = pill.x + pill.w - button.w - 6;
-    button.y = pill.y + 6;
+    gear_button.x = pill.x + pill.w - gear_button.w - 6;
+    gear_button.y = pill.y + 6;
+    inputs_button.x = gear_button.x - 6 - inputs_button.w;
+    inputs_button.y = pill.y + 6;
     // Darker glass than the dock: the top of a photo is often bright sky or sand.
     p.glass(pill, height / 2, rgb(0x0b1016, 0.38f), alpha);
     p.text(std::round(pill.x + pad), std::round(pill.y + (height - clock_.h) / 2), clock_, rgb(0xffffff), alpha);
 
-    button_rect_ = button;
-    Rect b = button.scaled(1 + 0.08f * pf);
-    if (pf > 0.01f) p.shadow(b, b.h / 2, 18, rgb(0x000000, 0.4f), pf * alpha);
-    p.fill(b, b.h / 2, rgb(0xffffff, 0.10f + 0.90f * pf), rgb(0xffffff, 0.10f + 0.90f * pf), alpha);
-    Color label = {1 - 0.9f * pf, 1 - 0.9f * pf, 1 - 0.88f * pf, 1};
-    p.text(std::round(b.x + (b.w - inputs_label_.w) / 2), std::round(b.y + (b.h - inputs_label_.h) / 2),
-           inputs_label_, label, alpha);
+    Texture gear = icons_.get(assets_ + "/icons/settings.png");
+    Rect buttons[2] = {inputs_button, gear_button};
+    for (int i = 0; i < 2; i++) {
+        button_rect_[i] = buttons[i];
+        float pf = std::max(0.f, pill_focus_[i].x);
+        Rect b = buttons[i].scaled(1 + 0.08f * pf);
+        if (pf > 0.01f) p.shadow(b, b.h / 2, 18, rgb(0x000000, 0.4f), pf * alpha);
+        p.fill(b, b.h / 2, rgb(0xffffff, 0.10f + 0.90f * pf), rgb(0xffffff, 0.10f + 0.90f * pf), alpha);
+        // White on glass, dark on the focused button.
+        Color ink = {1 - 0.9f * pf, 1 - 0.9f * pf, 1 - 0.88f * pf, 1};
+        if (i == 0) {
+            p.text(std::round(b.x + (b.w - inputs_label_.w) / 2), std::round(b.y + (b.h - inputs_label_.h) / 2),
+                   inputs_label_, ink, alpha);
+        } else if (gear.id) {
+            p.image(b.inset(b.w * 0.2f), 0, gear, ink, alpha);
+        }
+    }
 
     // Menus over everything, with the screen dimmed behind them.
     float dim = std::max({std::clamp(inputs_menu_.anim.x, 0.f, 1.f), std::clamp(tile_menu_.anim.x, 0.f, 1.f),
@@ -894,6 +914,6 @@ void Home::render(Painter &p) {
         if (my + mh > h_ - 20) my = t.y - 28 - mh;
         draw_menu(p, tile_menu_, t.x, my, kTileMenuW, 1);
     }
-    float sh = kMenuTitleH + 2 * kMenuPad + settings_.rows.size() * kMenuRowH;
-    draw_menu(p, settings_, (w_ - kSettingsW) / 2, (h_ - sh) / 2, kSettingsW, 1);
+    // Drops from the corner, like Inputs.
+    draw_menu(p, settings_, pill.x + pill.w - kSettingsW, pill.y + pill.h + 14, kSettingsW, 1);
 }

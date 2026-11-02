@@ -1,12 +1,12 @@
 #pragma once
 
-// The home screen: wallpaper, a status pill (clock + Inputs) at the top right,
+// The home screen: wallpaper, a status pill (clock, Inputs, settings) at the top right,
 // a glass dock of favourite apps, and the grid of all other apps below it.
 // Moving down into the grid scrolls the page up and blurs the wallpaper.
 //
 // Long-pressing OK on a tile opens a menu to move or hide it. Moving picks the
 // tile up (it wiggles) and the arrows carry it through the dock and grid.
-// A built-in Home Settings tile opens the settings sheet: wallpapers and the
+// The gear button beside Inputs opens the settings sheet: wallpapers and the
 // day/night appearance.
 
 #include "apps.h"
@@ -55,7 +55,8 @@ public:
     std::function<void(const std::string &app_id)> on_launch;  // apps and inputs alike
 
 private:
-    // Focus rows: kPill is the status pill, 0 the dock, 1.. the grid rows.
+    // Focus rows: kPill is the status pill (column 0 Inputs, 1 settings), 0 the
+    // dock, 1.. the grid rows.
     static constexpr int kPill = -1;
 
     struct Tile {
@@ -72,6 +73,7 @@ private:
     struct Menu {
         struct Row {
             Texture label, detail;  // detail: dim text at the right, may be empty
+            Texture thumb;          // a small picture left of the detail (not owned)
             bool dot = false;
             uint32_t dot_color = 0;
         };
@@ -138,7 +140,8 @@ private:
     std::string layout_path_;
 
     int row_ = 0, col_ = 0, dock_col_ = 0;
-    Spring scroll_, grid_, pill_focus_;
+    Spring scroll_, grid_;
+    Spring pill_focus_[2];  // Inputs, settings
     float time_ = 0;
 
     // OK (or the pointer button) held down, for long presses.
@@ -148,7 +151,7 @@ private:
     bool pointer_ = false;  // the pointer is in use (until a key is pressed)
     float px_ = 0, py_ = 0;
     bool rehover_ = false;  // re-pick the tile under the pointer once a wheel scroll settles
-    Rect button_rect_{};    // where render() last drew the Inputs button
+    Rect button_rect_[2]{};  // where render() last drew the Inputs and settings buttons
 
     Texture clock_, inputs_label_;
     int clock_minute_ = -1;
