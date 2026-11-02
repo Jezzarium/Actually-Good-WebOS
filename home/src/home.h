@@ -6,10 +6,12 @@
 
 #include "apps.h"
 #include "gfx.h"
+#include "icons.h"
 #include "wallpaper.h"
 
 #include <SDL.h>
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -28,6 +30,11 @@ public:
     void key(SDL_Keycode key);
     void update(float dt);
     void render(Painter &p);
+    // Replaces the apps, keeping focus on the same app where it still exists.
+    void set_apps(const std::vector<App> &apps);
+
+    std::function<void(const std::string &app_id)> on_launch;
+    std::function<void()> on_inputs;
 
 private:
     // Focus rows: kPill is the status pill, 0 the dock, 1.. the grid rows.
@@ -55,6 +62,7 @@ private:
     Wallpaper wallpaper_;
     TTF_Font *tile_font_ = nullptr, *label_font_ = nullptr, *pill_font_ = nullptr;
     std::vector<Tile> tiles_;
+    Icons icons_;
 
     int row_ = 0, col_ = 0, dock_col_ = 0;
     Spring scroll_, grid_, pill_focus_;

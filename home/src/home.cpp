@@ -18,6 +18,8 @@ constexpr float kDockPad = 34;       // glass around the dock tiles
 constexpr float kGridTop = 1035;     // first grid row: its top shows below the dock
 constexpr float kRowPitch = 240;     // grid rows, with room for the caption
 constexpr float kFocusScale = 0.10f;
+constexpr float kIconSize = 112;     // icon height inside a tile
+constexpr float kIconRadius = 18;
 
 // Springs: tvOS motion is quick but not bouncy.
 constexpr float kFocusStiffness = 260, kFocusDamping = 26;
@@ -59,18 +61,48 @@ bool Home::init(int w, int h, const char *font_path, const std::string &assets) 
         return false;
     }
 
-    for (App &app : placeholder_apps()) {
+    inputs_ = render_text(pill_font_, "Inputs");
+    refresh_clock();
+    set_apps(placeholder_apps());
+    return true;
+}
+
+void Home::set_apps(const std::vector<App> &apps) {
+    Uint64 t0 = SDL_GetPerformanceCounter();
+    std::string focused;
+    if (row_ != kPill && !tiles_.empty()) focused = tiles_[tile_index(row_, col_)].app.id;
+    for (Tile &t : tiles_) {
+        destroy(t.name);
+        destroy(t.label);
+    }
+    tiles_.clear();
+    for (const App &app : apps) {
         Tile t;
         t.app = app;
         t.name = render_text(tile_font_, app.title);
         t.label = render_text(label_font_, app.title);
         tiles_.push_back(std::move(t));
     }
-    inputs_ = render_text(pill_font_, "Inputs");
-    refresh_clock();
-    move_focus(0, 0, 0, 0);
+    if (tiles_.empty()) {
+        move_focus(kPill, 0, 0, 0);
+        return;
+    }
+
+    int row = 0, col = 0;
+    for (int i = 0; i < int(tiles_.size()); i++) {
+        if (tiles_[i].app.id != focused) continue;
+        if (i < dock_count()) {
+            col = i;
+        } else {
+            row = 1 + (i - dock_count()) / kCols;
+            col = (i - dock_count()) % kCols;
+        }
+    }
+    row_ = col_ = -2;  // force a fresh focus, not a bump
+    move_focus(row, col, 0, 0);
     for (Tile &t : tiles_) t.focus.snap(t.focus.target);
-    return true;
+    LOG("home: set_apps %zu in %.0f ms", tiles_.size(),
+        double(SDL_GetPerformanceCounter() - t0) * 1000 / SDL_GetPerformanceFrequency());
 }
 
 int Home::dock_count() const { return std::min<int>(kCols, int(tiles_.size())); }
@@ -144,8 +176,11 @@ void Home::key(SDL_Keycode key) {
         if (row_ >= 1) move_focus(0, dock_col_, 0, -1);
         break;
     case SDLK_RETURN:
-        if (row_ == kPill) LOG("home: open inputs");
-        else LOG("home: launch %s", tiles_[tile_index(row_, col_)].app.id.c_str());
+        if (row_ == kPill) {
+            if (on_inputs) on_inputs();
+        } else if (on_launch) {
+            on_launch(tiles_[tile_index(row_, col_)].app.id);
+        }
         break;
     default: LOG("home: key %d", int(key)); break;
     }
@@ -164,6 +199,7 @@ void Home::refresh_clock() {
 }
 
 void Home::update(float dt) {
+    icons_.upload_ready();
     for (Tile &t : tiles_) {
         t.focus.step(dt, kFocusStiffness, kFocusDamping);
         t.lean_x.step(dt, kLeanStiffness, kLeanDamping);
@@ -192,13 +228,24 @@ void Home::draw_tile(Painter &p, int row, int col) {
     }
     // The shine moves with the lean and rests once the tile is still.
     float sx = kShineX + tile.lean_x.x * kShineTravel, sy = kShineY + tile.lean_y.x * kShineTravel;
-    p.fill_shine(s, kRadius * (1 + kFocusScale * f), shade(tile.app.color, 1.15f, 0.06f),
-                 shade(tile.app.color, 0.85f), sx, sy, 0.22f * f);
+    uint32_t color = tile.app.color;
+    bool seamless = icons_.edge_color(tile.app.icon, &color);
+    // A gentle vertical gradient, flat where it has to meet the icon's edge.
+    Color top = seamless ? rgb(color) : shade(color, 1.15f, 0.06f);
+    Color bottom = seamless ? rgb(color) : shade(color, 0.85f);
+    p.fill_shine(s, kRadius * (1 + kFocusScale * f), top, bottom, sx, sy, 0.22f * f);
 
     float k = 1 + kFocusScale * f;
-    Rect name{s.x + (s.w - tile.name.w * k) / 2, s.y + (s.h - tile.name.h * k) / 2, tile.name.w * k,
-              tile.name.h * k};
-    p.image(name, 0, tile.name, rgb(0xffffff));
+    Texture icon = icons_.get(tile.app.icon);
+    if (icon.id) {
+        float ih = kIconSize * k, iw = ih * icon.w / icon.h;
+        Rect r_icon{s.x + (s.w - iw) / 2, s.y + (s.h - ih) / 2, iw, ih};
+        p.image(r_icon, kIconRadius * k, icon);
+    } else {
+        Rect name{s.x + (s.w - tile.name.w * k) / 2, s.y + (s.h - tile.name.h * k) / 2, tile.name.w * k,
+                  tile.name.h * k};
+        p.image(name, 0, tile.name, rgb(0xffffff));
+    }
 
     if (row >= 1) {
         p.text(std::round(r.x + (r.w - tile.label.w) / 2), std::round(s.y + s.h + 14), tile.label,

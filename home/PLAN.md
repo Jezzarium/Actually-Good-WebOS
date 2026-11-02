@@ -56,8 +56,13 @@ shaders; no UI framework is needed. The same code builds as a desktop window on 
 - **Why not Flutter:** tried first. The TV's Flutter (3.22.2, used by LG Home) is LG-patched; an
   app compiled with upstream tools crashes on the first draw call. LG's public flutter-webos SDK
   (Flutter 3.38, bundles its own engine) only supports webOS 26 and later.
-- **Luna:** as root the app may call any service (`listLaunchPoints`, `launch`, input switching)
-  with no permission errors, directly through `libluna-service2`.
+- **Sandbox:** the app manager runs developer apps as user `prisoner` chrooted in
+  `/var/palm/jail/<id>`, with only the `public` Luna group (`jailer_disabled` does not apply to
+  developer apps). The jail's mounts live in the TV's main mount table, so at startup the app asks
+  the Homebrew Channel's root `exec` service (callable from `public`) to bind the other apps'
+  folders in read-only, for their icons.
+- **Luna:** directly through `libluna-service2`, registered anonymously (LG's SDL already holds
+  the app's own name in-process). `listLaunchPoints` and `launch` work from `public`.
 - **Home button:** a surface-manager key filter, like the one in `tv/settings-key`, sends the
   Home button to us directly. Also set as the default home app with `setDefaultApp`, so
   power-on works through `tv/default-home`.

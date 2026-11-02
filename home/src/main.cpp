@@ -4,6 +4,7 @@
 #include "gfx.h"
 #include "home.h"
 #include "log.h"
+#include "luna.h"
 
 #include <SDL.h>
 #include <SDL_image.h>
@@ -14,6 +15,20 @@
 #include <string>
 
 namespace {
+
+const char *kAppId = "com.lgtvtweaks.home";
+const char *kAppManager = "luna://com.webos.applicationManager/";
+
+// The app manager runs developer apps chrooted in /var/palm/jail/<id>, where
+// other apps' folders (and so their icons) don't exist. The jail's mounts live
+// in the TV's main mount table, so ask the Homebrew Channel's root exec
+// service to bind them in read-only. Idempotent; gone at reboot.
+const char *kJailMounts =
+    "J=/var/palm/jail/com.lgtvtweaks.home; "
+    "for d in /media/cryptofs/apps/usr/palm/applications /mnt/otncabi/usr/palm/applications "
+    "/usr/palm/applications; do "
+    "mkdir -p $J$d && { grep -q \" $J$d \" /proc/mounts || "
+    "{ mount --bind $d $J$d && mount -o remount,bind,ro $J$d; }; }; done";
 
 #ifdef HOME_WEBOS
 const char *kFont = "/usr/share/fonts/LG_Smart_UI-SemiBold.ttf";
@@ -39,7 +54,12 @@ std::string assets_dir() {
 
 }  // namespace
 
-int main(int, char **) {
+int main(int argc, char **argv) {
+    // Launched by the app manager (argv[1] is its JSON), stderr is /dev/null.
+    if (argc > 1 && argv[1][0] == '{' && std::freopen("/tmp/lgtv-home.log", "w", stderr)) {
+        std::setvbuf(stderr, nullptr, _IONBF, 0);  // freopen makes it fully buffered
+    }
+
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0 || TTF_Init() != 0 ||
         !(IMG_Init(IMG_INIT_JPG | IMG_INIT_PNG) & IMG_INIT_JPG)) {
         LOG("init: %s", SDL_GetError());
@@ -74,10 +94,61 @@ int main(int, char **) {
     if (!painter.init(w, h) || !home.init(w, h, font, assets_dir())) return 1;
     LOG("home: ready in %.0f ms", double(SDL_GetPerformanceCounter() - t0) * 1000 / freq);
 
+    Luna luna;
+    if (luna.connect(kAppId)) {
+        auto show = [&home](json_object *reply) {
+            std::vector<App> apps = apps_from_launch_points(reply, kAppId);
+            LOG("home: %zu apps", apps.size());
+            if (!apps.empty()) home.set_apps(apps);
+        };
+        // The first reply has the list; later ones describe one change, so
+        // fetch the whole list again rather than patching it.
+        auto list_apps = [&luna, show] {
+            luna.subscribe(std::string(kAppManager) + "listLaunchPoints", R"({"subscribe":true})",
+                           [&luna, show](json_object *reply) {
+                               json_object *list;
+                               if (json_object_object_get_ex(reply, "launchPoints", &list)) {
+                                   show(reply);
+                               } else if (json_object_object_get_ex(reply, "change", &list)) {
+                                   luna.call(std::string(kAppManager) + "listLaunchPoints", "{}", show);
+                               } else {
+                                   LOG("home: listLaunchPoints: %s", json_object_to_json_string(reply));
+                               }
+                           });
+        };
+        // Icons are read as soon as the list arrives, so mount first.
+        json_object *exec = json_object_new_object();
+        json_object_object_add(exec, "command", json_object_new_string(kJailMounts));
+        luna.call("luna://org.webosbrew.hbchannel.service/exec", json_object_to_json_string(exec),
+                  [list_apps](json_object *reply) {
+                      if (!get_bool(reply, "returnValue")) {
+                          LOG("home: jail mounts: %s", json_object_to_json_string(reply));
+                      }
+                      list_apps();
+                  });
+        json_object_put(exec);
+        home.on_launch = [&luna](const std::string &id) {
+            LOG("home: launch %s", id.c_str());
+            json_object *params = json_object_new_object();
+            json_object_object_add(params, "id", json_object_new_string(id.c_str()));
+            luna.call(std::string(kAppManager) + "launch", json_object_to_json_string(params),
+                      [id](json_object *reply) {
+                          if (!get_bool(reply, "returnValue")) {
+                              LOG("home: launch %s: %s", id.c_str(), json_object_to_json_string(reply));
+                          }
+                      });
+            json_object_put(params);
+        };
+    } else {
+        LOG("home: no Luna bus, showing placeholder apps");
+    }
+    home.on_inputs = [] { LOG("home: open inputs"); };
+
     Uint64 last = SDL_GetPerformanceCounter(), stats_start = last;
     int frames = 0;
     double worst = 0;
     for (bool running = true; running;) {
+        luna.pump();
         for (SDL_Event e; SDL_PollEvent(&e);) {
             if (e.type == SDL_QUIT) running = false;
             if (e.type == SDL_KEYDOWN) home.key(e.key.keysym.sym);
@@ -86,6 +157,7 @@ int main(int, char **) {
         Uint64 now = SDL_GetPerformanceCounter();
         double dt = double(now - last) / freq;
         last = now;
+        if (dt > 0.1) LOG("home: slow frame %.0f ms", dt * 1000);
         worst = std::max(worst, dt);
         if (++frames, now - stats_start >= 5 * freq) {
             LOG("home: %.1f fps, worst frame %.1f ms", frames / (double(now - stats_start) / freq),
