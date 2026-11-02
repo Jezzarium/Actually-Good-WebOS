@@ -51,8 +51,8 @@ of memory, and kept resident so the Home button brings it back instantly.
   **Hide** it; while moving, the arrows carry it and OK or Back drops it. Back in the grid returns
   to the dock.
 - **Magic Remote:** pointing focuses, clicking opens, the wheel scrolls a row at a time.
-- **Home Settings** (the gear in the corner): wallpaper and night wallpaper (Left/Right to switch,
-  previewed live), appearance (automatic night from 7 PM to 7 AM, always day, always night), show
+- **Home Settings** (the gear in the corner): wallpaper (Left/Right to switch, previewed live),
+  appearance (night dims the wallpaper; automatic from 7 PM to 7 AM, always day, always night), show
   hidden apps, reset layout.
 - **Your own wallpapers:** copy JPEGs (ideally 1920x1080) to `/var/lib/lgtv-home/wallpapers/` on
   the TV, then pick them in Home Settings. The layout and settings live in

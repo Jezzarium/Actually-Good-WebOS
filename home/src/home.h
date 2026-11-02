@@ -122,7 +122,7 @@ private:
     void refresh_settings();  // row details from layout_
     std::vector<std::string> wallpaper_names() const;
     std::string wallpaper_path(const std::string &name) const;
-    void load_wallpapers();   // from layout_
+    void load_wallpaper_image();  // from layout_
     bool night_now() const;
 
     void draw_tile(Painter &p, int index);
@@ -130,8 +130,8 @@ private:
 
     int w_ = 0, h_ = 0;
     std::string assets_;
-    Wallpaper wallpaper_, night_wallpaper_;  // night_ only when a separate image is chosen
-    Spring night_;                           // 0 day .. 1 night
+    Wallpaper wallpaper_;
+    Spring night_;  // 0 day .. 1 night (dims the wallpaper)
     TTF_Font *tile_font_ = nullptr, *label_font_ = nullptr, *pill_font_ = nullptr, *title_font_ = nullptr;
     std::vector<App> apps_;  // everything LG lists
     std::vector<Tile> tiles_;

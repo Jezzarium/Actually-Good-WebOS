@@ -107,12 +107,12 @@ bool Home::init(int w, int h, const char *font_path, const std::string &assets) 
         tile_menu_.rows.push_back(row);
     }
     settings_.title = render_text(title_font_, "Home Settings");
-    for (const char *name : {"Wallpaper", "Night wallpaper", "Appearance", "Show hidden apps", "Reset layout"}) {
+    for (const char *name : {"Wallpaper", "Appearance", "Show hidden apps", "Reset layout"}) {
         Menu::Row row;
         row.label = render_text(pill_font_, name);
         settings_.rows.push_back(row);
     }
-    load_wallpapers();
+    load_wallpaper_image();
     night_.snap(night_now() ? 1 : 0);
     refresh_clock();
     set_apps(placeholder_apps());
@@ -147,16 +147,11 @@ std::string Home::wallpaper_path(const std::string &name) const {
     return assets_ + "/wallpapers/" + name;
 }
 
-void Home::load_wallpapers() {
+void Home::load_wallpaper_image() {
     destroy(wallpaper_.sharp);
     destroy(wallpaper_.blurred);
-    destroy(night_wallpaper_.sharp);
-    destroy(night_wallpaper_.blurred);
-    std::string day = layout_.wallpaper.empty() ? kDefaultWallpaper : layout_.wallpaper;
-    wallpaper_ = load_wallpaper(wallpaper_path(day), w_, h_);
-    if (!layout_.night_wallpaper.empty() && layout_.night_wallpaper != day) {
-        night_wallpaper_ = load_wallpaper(wallpaper_path(layout_.night_wallpaper), w_, h_);
-    }
+    wallpaper_ = load_wallpaper(wallpaper_path(layout_.wallpaper.empty() ? kDefaultWallpaper : layout_.wallpaper),
+                                w_, h_);
 }
 
 bool Home::night_now() const {
@@ -176,18 +171,16 @@ void Home::open_settings() {
 
 void Home::refresh_settings() {
     auto stem = [](const std::string &file) { return file.substr(0, file.rfind('.')); };
-    std::string details[5];
+    std::string details[4];
     // Arrows on the rows Left/Right change.
     auto choice = [](const std::string &value) { return "\u2039  " + value + "  \u203a"; };
     details[0] = choice(stem(layout_.wallpaper.empty() ? kDefaultWallpaper : layout_.wallpaper));
-    details[1] = choice(layout_.night_wallpaper.empty() ? "Same, dimmed" : stem(layout_.night_wallpaper));
-    details[2] = choice(layout_.appearance == "day"     ? "Always day"
+    details[1] = choice(layout_.appearance == "day"     ? "Always day"
                         : layout_.appearance == "night" ? "Always night"
                                                         : "Automatic");
+    details[2] = layout_.hidden.empty() ? "None hidden" : std::to_string(layout_.hidden.size()) + " hidden";
     settings_.rows[0].thumb = wallpaper_.sharp;
-    settings_.rows[1].thumb = night_wallpaper_.sharp.id ? night_wallpaper_.sharp : wallpaper_.sharp;
-    details[3] = layout_.hidden.empty() ? "None hidden" : std::to_string(layout_.hidden.size()) + " hidden";
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 4; i++) {
         destroy(settings_.rows[i].detail);
         if (!details[i].empty()) settings_.rows[i].detail = render_text(label_font_, details[i]);
     }
@@ -196,7 +189,7 @@ void Home::refresh_settings() {
 void Home::settings_key(SDL_Keycode key) {
     int row = settings_.focus;
     int step = key == SDLK_LEFT ? -1 : 1;
-    bool cycle = (key == SDLK_LEFT || key == SDLK_RIGHT || key == SDLK_RETURN) && row <= 2;
+    bool cycle = (key == SDLK_LEFT || key == SDLK_RIGHT || key == SDLK_RETURN) && row <= 1;
     if (key == SDLK_UP || key == SDLK_DOWN || key == SDLK_ESCAPE || key == SDLK_AC_BACK) {
         menu_key(settings_, key);
         return;
@@ -211,26 +204,22 @@ void Home::settings_key(SDL_Keycode key) {
         if (row == 0 && !names.empty()) {
             layout_.wallpaper = next(names, layout_.wallpaper.empty() ? kDefaultWallpaper : layout_.wallpaper);
             if (layout_.wallpaper == kDefaultWallpaper) layout_.wallpaper.clear();
-            load_wallpapers();
+            load_wallpaper_image();
         } else if (row == 1) {
-            names.insert(names.begin(), "");  // the day wallpaper, dimmed
-            layout_.night_wallpaper = next(names, layout_.night_wallpaper);
-            load_wallpapers();
-        } else if (row == 2) {
             layout_.appearance = next({"auto", "day", "night"}, layout_.appearance);
             night_.target = night_now() ? 1 : 0;
         }
-    } else if (key == SDLK_RETURN && row == 3) {
+    } else if (key == SDLK_RETURN && row == 2) {
         layout_.hidden.clear();
         rebuild_tiles();
-    } else if (key == SDLK_RETURN && row == 4) {
+    } else if (key == SDLK_RETURN && row == 3) {
         layout_.order.clear();
         layout_.hidden.clear();
         rebuild_tiles();
     } else {
         return;
     }
-    if (row >= 3) {
+    if (row >= 2) {
         if (!layout_path_.empty()) layout_.save(layout_path_);
     } else {
         save_layout();
@@ -248,7 +237,7 @@ void Home::set_apps(const std::vector<App> &apps) {
 void Home::set_layout_path(const std::string &path) {
     layout_path_ = path;
     if (!layout_.load(path)) layout_ = {};
-    load_wallpapers();
+    load_wallpaper_image();
     night_.target = night_now() ? 1 : 0;
     rebuild_tiles();
 }
@@ -830,18 +819,12 @@ void Home::render(Painter &p) {
     Rect screen{0, 0, float(w_), float(h_)};
 
     float n = std::clamp(night_.x, 0.f, 1.f);
-    bool night_image = night_wallpaper_.sharp.id != 0;
-    p.set_backdrop(night_image && n > 0.5f ? night_wallpaper_.blurred : wallpaper_.blurred);
-    // Wallpaper, crossfading to its blurred copy and dimming in the grid; at
-    // night, the night wallpaper fades in over it, or the day one dims.
+    p.set_backdrop(wallpaper_.blurred);
+    // Wallpaper, crossfading to its blurred copy and dimming in the grid, and
+    // at night.
     p.image(screen, 0, wallpaper_.sharp);
     p.image(screen, 0, wallpaper_.blurred, {1, 1, 1, 1}, g);
-    if (night_image) {
-        p.image(screen, 0, night_wallpaper_.sharp, {1, 1, 1, 1}, n);
-        p.image(screen, 0, night_wallpaper_.blurred, {1, 1, 1, 1}, n * g);
-    } else {
-        p.fill(screen, 0, rgb(0x050a1a, 0.45f), rgb(0x050a1a, 0.55f), n);
-    }
+    p.fill(screen, 0, rgb(0x050a1a, 0.45f), rgb(0x050a1a, 0.55f), n);
 
     // Glass dock behind the first row, dimmed with the wallpaper in the grid;
     // smoky rather than milky at night.
