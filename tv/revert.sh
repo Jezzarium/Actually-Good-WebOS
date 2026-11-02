@@ -16,6 +16,10 @@ luna-send -n 1 luna://com.webos.settingsservice/setSystemSettings "{\"category\"
 luna-send -n 1 luna://com.webos.service.preloadmanager/setPreloadPolicy "{\"application\":{\"id\":\"com.webos.app.home\",\"isEnabled\":true}}" </dev/null >/dev/null 2>&1
 echo home restored'
 
+# 0a2. Keep-alive list back to LG's (the home screen was added to it)
+KEEP=$(python3 -I -c 'import json; print(json.dumps(json.load(open("keepAlive_before.json")), separators=(",", ":")))')
+ssh lgtv "luna-send -n 1 luna://com.webos.service.config/setConfigs '$KEEP' </dev/null >/dev/null 2>&1; echo keep-alive restored"
+
 # 0b-pre. DNS allowlist (own-your-glass's restore below regenerates nothing, so just stop pruning)
 ssh lgtv 'rm -f /var/lib/webosbrew/init.d/oyg-allow; rm -rf /var/lib/lgtv-tweaks; [ -f /tmp/oyg-allow.pid ] && kill $(cat /tmp/oyg-allow.pid) 2>/dev/null; echo allowlist removed'
 

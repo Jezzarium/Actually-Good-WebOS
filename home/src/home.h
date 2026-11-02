@@ -28,6 +28,10 @@ public:
     // assets: the folder holding wallpapers/.
     bool init(int w, int h, const char *font_path, const std::string &assets);
     void key(SDL_Keycode key);
+    // The Magic Remote pointer, in screen pixels.
+    void pointer_move(float x, float y);
+    void pointer_click();
+    void wheel(int steps);  // positive: up
     void update(float dt);
     void render(Painter &p);
     // Replaces the apps, keeping focus on the same app where it still exists.
@@ -54,7 +58,11 @@ private:
     int tile_index(int row, int col) const;
     Rect tile_rect(int row, int col) const;  // unscrolled
     // dx, dy: the direction pressed, for the lean (0, 0 when not from a key).
-    void move_focus(int row, int col, int dx, int dy);
+    // scroll: bring the focused row into view (not when the pointer moved it).
+    void move_focus(int row, int col, int dx, int dy, bool scroll = true);
+    void activate();  // OK on the focused item
+    bool hit_tile(float x, float y, int *row, int *col) const;
+    float max_scroll() const;
     void draw_tile(Painter &p, int row, int col);
     // The inputs panel, hanging below the status pill.
     void draw_inputs(Painter &p, Rect pill);
@@ -69,6 +77,10 @@ private:
 
     int row_ = 0, col_ = 0, dock_col_ = 0;
     Spring scroll_, grid_, pill_focus_;
+
+    bool pointer_ = false;  // the pointer is in use (until a key is pressed)
+    float px_ = 0, py_ = 0;
+    Rect button_rect_{}, panel_rect_{};  // where render() last drew them
 
     Texture clock_, inputs_;
     int clock_minute_ = -1;

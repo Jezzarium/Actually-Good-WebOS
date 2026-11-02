@@ -172,6 +172,12 @@ int main(int argc, char **argv) {
 #endif
                 home.key(key);
             }
+            if (e.type == SDL_MOUSEMOTION) home.pointer_move(float(e.motion.x), float(e.motion.y));
+            if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
+                home.pointer_move(float(e.button.x), float(e.button.y));
+                home.pointer_click();
+            }
+            if (e.type == SDL_MOUSEWHEEL && e.wheel.y) home.wheel(e.wheel.y);
         }
 
         Uint64 now = SDL_GetPerformanceCounter();
