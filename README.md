@@ -9,10 +9,25 @@ This was entirely written using Claude Code on Opus 5.5. It works on my machine 
 Built and tested on an LG OLED65C5PUA (webOS 10.3.1, Chromium 120 web engine), rooted, with the
 [Homebrew Channel](https://www.webosbrew.org/) and its SSH server.
 
+## Install
+
+With `ssh lgtv` logging in to the TV as root, and the toolchain for the home screen (see
+[Home screen](#home-screen-home)):
+
+```sh
+tv/install.sh                  # build and install both apps, make Home the TV's home, add the boot scripts
+tv/install.sh --trim-preloads  # also stop LG preloading apps you don't use
+tv/uninstall.sh                # give everything back to LG and remove both apps
+tv/uninstall.sh --purge        # also delete the home screen's layout and wallpapers
+```
+
+Running `install.sh` again updates the apps; `--no-build` installs the packages already built.
+`LGTV_HOST` picks another ssh host. The sections below describe each piece and how to do it by hand.
+
 | Folder | What it is |
 |---|---|
 | [`settings/`](settings) | **Quick Settings**: a replacement for LG's settings panel, opened by the remote's Settings button |
-| [`tv/`](tv) | Scripts that run on the TV (boot hooks, the Settings-button handler) and `revert.sh` to undo everything |
+| [`tv/`](tv) | `install.sh` and `uninstall.sh`, and the scripts they put on the TV (boot hooks, the Settings-button handler) |
 | [`home/`](home) | **Home**: a tvOS-style home screen and the TV's default Home app, native C++ with SDL2 and OpenGL ES |
 
 ## Quick Settings (`settings/`)
@@ -108,12 +123,12 @@ Copied to `/var/lib/webosbrew/init.d/` on the TV, where the Homebrew Channel run
 | Script | What it does |
 |---|---|
 | `settings-key` + `settingskey.js` | Adds a key handler to surface-manager (`com.webos.surfacemanager.keyFilters`) so the Settings button opens Quick Settings, and preloads the app hidden. No system files are patched. |
-| `default-home` | Opens the default Home app at power-on if the TV didn't (see below) and keeps LG's home out of memory while something else is the default. |
+| `default-home` | Opens the default Home app at power-on if the TV didn't (see [Home screen](#home-screen-home)) and keeps LG's home out of memory while something else is the default. |
 | `trim-preloads` | Stops LG's preload manager keeping unused apps (browser, voice, Prime Video, Netflix, Live TV, LG Channels) in memory, at boot and after every wake. |
 
 `settingskey.js` lives in `/var/lib/lgtv-tweaks/` on the TV.
 
-`tv/revert.sh` undoes everything: Settings button, Home and power-on, the keep-alive list, preloads, and the privacy settings changed along the way. It uses the saved originals in `tv/*_before.json`. The apps themselves stay installed; remove them from the TV's app list (and `/var/lib/lgtv-home` for the home screen's layout and wallpapers).
+`tv/uninstall.sh` undoes all of `tv/install.sh`: the Settings button, Home and power-on, the keep-alive list, the preloads `default-home` and `trim-preloads` turned off, the boot scripts and both apps. It edits the TV's current lists rather than restoring old copies; `tv/*_before.json` are LG's originals, for reference.
 
 ## Notes for working on the TV
 

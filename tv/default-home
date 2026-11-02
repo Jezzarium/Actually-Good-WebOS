@@ -7,7 +7,7 @@
 # /var/webos-profile/override/) sets to ours. This script is the fallback for when it
 # doesn't, e.g. after a reboot by fault, where bootd opens the last input instead.
 # Switch Home back with setDefaultApp '{"category":"home","appId":"com.webos.app.home"}';
-# this script follows it. Undo: rm this script and kill its process.
+# this script follows it. Installed and removed by tv/install.sh and tv/uninstall.sh.
 
 LG=com.webos.app.home
 PIDFILE=/tmp/default-home.pid
