@@ -36,7 +36,7 @@ const char *kJailMounts =
     "/usr/palm/applications; do "
     "mkdir -p $J$d && { grep -q \" $J$d \" /proc/mounts || "
     "{ mount --bind $d $J$d && mount -o remount,bind,ro $J$d; }; }; done; "
-    "mkdir -p $D $J$D && chown 6067:5000 $D && "  // the jail's prisoner:jailer
+    "mkdir -p $D/wallpapers $J$D && chown -R 6067:5000 $D && "  // the jail's prisoner:jailer
     "{ grep -q \" $J$D \" /proc/mounts || mount --bind $D $J$D; }";
 
 #ifdef HOME_WEBOS

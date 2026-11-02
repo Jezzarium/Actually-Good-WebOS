@@ -6,6 +6,9 @@
 #include <cmath>
 #include <ctime>
 #include <map>
+#include <set>
+
+#include <dirent.h>
 
 namespace {
 
@@ -41,7 +44,15 @@ constexpr float kWiggleAngle = 0.035f, kWiggleSpeed = 15;
 
 // Menus (Inputs, the tile menu).
 constexpr float kMenuPad = 12, kMenuRowH = 72, kMenuRadius = 30;
-constexpr float kInputsW = 480, kTileMenuW = 300;
+constexpr float kInputsW = 480, kTileMenuW = 300, kSettingsW = 820, kMenuTitleH = 92;
+
+// The built-in tile that opens the settings sheet.
+const char *kSettingsId = "lgtvtweaks.home-settings";
+// Wallpapers: bundled in assets/wallpapers, plus any the user copies here.
+const char *kUserWallpapers = "/var/lib/lgtv-home/wallpapers";
+const char *kDefaultWallpaper = "default.jpg";
+// Automatic appearance: night between these hours.
+constexpr int kNightFrom = 19, kNightTo = 7;
 
 Color shade(uint32_t hex, float k, float lift = 0) {
     Color c = rgb(hex);
@@ -80,12 +91,13 @@ void Home::Menu::clear() {
 bool Home::init(int w, int h, const char *font_path, const std::string &assets) {
     w_ = w;
     h_ = h;
-    wallpaper_ = load_wallpaper(assets + "/wallpapers/default.jpg", w, h);
+    assets_ = assets;
 
     tile_font_ = TTF_OpenFont(font_path, 30);
     label_font_ = TTF_OpenFont(font_path, 26);
     pill_font_ = TTF_OpenFont(font_path, 28);
-    if (!tile_font_ || !label_font_ || !pill_font_) {
+    title_font_ = TTF_OpenFont(font_path, 40);
+    if (!tile_font_ || !label_font_ || !pill_font_ || !title_font_) {
         LOG("font %s: %s", font_path, TTF_GetError());
         return false;
     }
@@ -96,22 +108,145 @@ bool Home::init(int w, int h, const char *font_path, const std::string &assets) 
         row.label = render_text(pill_font_, action);
         tile_menu_.rows.push_back(row);
     }
+    settings_.title = render_text(title_font_, "Home Settings");
+    for (const char *name : {"Wallpaper", "Night wallpaper", "Appearance", "Show hidden apps", "Reset layout"}) {
+        Menu::Row row;
+        row.label = render_text(pill_font_, name);
+        settings_.rows.push_back(row);
+    }
+    load_wallpapers();
+    night_.snap(night_now() ? 1 : 0);
     refresh_clock();
     set_apps(placeholder_apps());
     set_inputs(placeholder_inputs());
     return true;
 }
 
+// --- Settings --------------------------------------------------------------
+
+std::vector<std::string> Home::wallpaper_names() const {
+    std::set<std::string> names;
+    for (const std::string &dir : {assets_ + "/wallpapers", std::string(kUserWallpapers)}) {
+        DIR *d = opendir(dir.c_str());
+        if (!d) continue;
+        while (dirent *e = readdir(d)) {
+            std::string name = e->d_name;
+            std::string ext = name.size() > 4 ? name.substr(name.size() - 4) : "";
+            for (char &c : ext) c = char(std::tolower(c));
+            if (ext == ".jpg" || ext == "jpeg" || ext == ".png") names.insert(name);
+        }
+        closedir(d);
+    }
+    return {names.begin(), names.end()};
+}
+
+std::string Home::wallpaper_path(const std::string &name) const {
+    std::string user = std::string(kUserWallpapers) + "/" + name;
+    if (FILE *f = std::fopen(user.c_str(), "rb")) {
+        std::fclose(f);
+        return user;
+    }
+    return assets_ + "/wallpapers/" + name;
+}
+
+void Home::load_wallpapers() {
+    destroy(wallpaper_.sharp);
+    destroy(wallpaper_.blurred);
+    destroy(night_wallpaper_.sharp);
+    destroy(night_wallpaper_.blurred);
+    std::string day = layout_.wallpaper.empty() ? kDefaultWallpaper : layout_.wallpaper;
+    wallpaper_ = load_wallpaper(wallpaper_path(day), w_, h_);
+    if (!layout_.night_wallpaper.empty() && layout_.night_wallpaper != day) {
+        night_wallpaper_ = load_wallpaper(wallpaper_path(layout_.night_wallpaper), w_, h_);
+    }
+}
+
+bool Home::night_now() const {
+    if (layout_.appearance == "day") return false;
+    if (layout_.appearance == "night") return true;
+    std::time_t now = std::time(nullptr);
+    std::tm local;
+    localtime_r(&now, &local);
+    return local.tm_hour >= kNightFrom || local.tm_hour < kNightTo;
+}
+
+void Home::open_settings() {
+    refresh_settings();
+    settings_.focus = 0;
+    settings_.show();
+}
+
+void Home::refresh_settings() {
+    auto stem = [](const std::string &file) { return file.substr(0, file.rfind('.')); };
+    std::string details[5];
+    details[0] = stem(layout_.wallpaper.empty() ? kDefaultWallpaper : layout_.wallpaper);
+    details[1] = layout_.night_wallpaper.empty() ? "Same, dimmed" : stem(layout_.night_wallpaper);
+    details[2] = layout_.appearance == "day" ? "Always day" : layout_.appearance == "night" ? "Always night" : "Automatic";
+    details[3] = layout_.hidden.empty() ? "None hidden" : std::to_string(layout_.hidden.size()) + " hidden";
+    for (int i = 0; i < 5; i++) {
+        destroy(settings_.rows[i].detail);
+        if (!details[i].empty()) settings_.rows[i].detail = render_text(label_font_, details[i]);
+    }
+}
+
+void Home::settings_key(SDL_Keycode key) {
+    int row = settings_.focus;
+    int step = key == SDLK_LEFT ? -1 : 1;
+    bool cycle = (key == SDLK_LEFT || key == SDLK_RIGHT || key == SDLK_RETURN) && row <= 2;
+    if (key == SDLK_UP || key == SDLK_DOWN || key == SDLK_ESCAPE || key == SDLK_AC_BACK) {
+        menu_key(settings_, key);
+        return;
+    }
+    if (cycle) {
+        auto next = [step](const std::vector<std::string> &options, const std::string &current) {
+            auto it = std::find(options.begin(), options.end(), current);
+            int i = it == options.end() ? 0 : int(it - options.begin());
+            return options[(i + step + options.size()) % options.size()];
+        };
+        std::vector<std::string> names = wallpaper_names();
+        if (row == 0 && !names.empty()) {
+            layout_.wallpaper = next(names, layout_.wallpaper.empty() ? kDefaultWallpaper : layout_.wallpaper);
+            if (layout_.wallpaper == kDefaultWallpaper) layout_.wallpaper.clear();
+            load_wallpapers();
+        } else if (row == 1) {
+            names.insert(names.begin(), "");  // the day wallpaper, dimmed
+            layout_.night_wallpaper = next(names, layout_.night_wallpaper);
+            load_wallpapers();
+        } else if (row == 2) {
+            layout_.appearance = next({"auto", "day", "night"}, layout_.appearance);
+            night_.target = night_now() ? 1 : 0;
+        }
+    } else if (key == SDLK_RETURN && row == 3) {
+        layout_.hidden.clear();
+        rebuild_tiles();
+    } else if (key == SDLK_RETURN && row == 4) {
+        layout_.order.clear();
+        layout_.hidden.clear();
+        rebuild_tiles();
+    } else {
+        return;
+    }
+    if (row >= 3) {
+        if (!layout_path_.empty()) layout_.save(layout_path_);
+    } else {
+        save_layout();
+    }
+    refresh_settings();
+}
+
 // --- Apps and layout -------------------------------------------------------
 
 void Home::set_apps(const std::vector<App> &apps) {
     apps_ = apps;
+    apps_.push_back({kSettingsId, "Home Settings", assets_ + "/icons/settings.png", 0x5f6673});
     rebuild_tiles();
 }
 
 void Home::set_layout_path(const std::string &path) {
     layout_path_ = path;
     if (!layout_.load(path)) layout_ = {};
+    load_wallpapers();
+    night_.target = night_now() ? 1 : 0;
     rebuild_tiles();
 }
 
@@ -300,11 +435,18 @@ void Home::key_up(SDL_Keycode key) {
 }
 
 void Home::press(SDL_Keycode key) {
+    if (settings_.open) {
+        settings_key(key);
+        return;
+    }
     if (tile_menu_.open) {
         if (menu_key(tile_menu_, key) == MenuResult::kChosen) {
             if (tile_menu_.focus == 0) {
                 moving_ = true;
                 wiggle_.target = 1;
+            } else if (row_ != kPill && tiles_[tile_index(row_, col_)].app.id == kSettingsId) {
+                // Never hidden: it's the way back to "Show hidden apps".
+                tiles_[tile_index(row_, col_)].lean_x.v += 9;
             } else if (row_ != kPill) {
                 layout_.hidden.push_back(tiles_[tile_index(row_, col_)].app.id);
                 tiles_.erase(tiles_.begin() + tile_index(row_, col_));
@@ -342,13 +484,15 @@ void Home::press(SDL_Keycode key) {
 void Home::activate() {
     if (row_ == kPill) {
         if (!inputs_menu_.rows.empty()) inputs_menu_.show();
+    } else if (tiles_[tile_index(row_, col_)].app.id == kSettingsId) {
+        open_settings();
     } else if (on_launch) {
         on_launch(tiles_[tile_index(row_, col_)].app.id);
     }
 }
 
 void Home::long_press() {
-    if (row_ == kPill || moving_ || tile_menu_.open || inputs_menu_.open || tiles_.empty()) return;
+    if (row_ == kPill || moving_ || tile_menu_.open || inputs_menu_.open || settings_.open || tiles_.empty()) return;
     tile_menu_.focus = 0;
     tile_menu_.show();
 }
@@ -414,6 +558,7 @@ void Home::pointer_move(float x, float y) {
     pointer_ = true;
     px_ = x;
     py_ = y;
+    if (settings_.open) return menu_pointer(settings_, x, y);
     if (tile_menu_.open) return menu_pointer(tile_menu_, x, y);
     if (inputs_menu_.open) return menu_pointer(inputs_menu_, x, y);
     if (moving_) return;
@@ -443,7 +588,7 @@ void Home::pointer_up() {
     holding_ = false;
     if (held_long_) return;
     // A click.
-    for (Menu *m : {&tile_menu_, &inputs_menu_}) {
+    for (Menu *m : {&settings_, &tile_menu_, &inputs_menu_}) {
         if (!m->open) continue;
         if (inside(m->rect, px_, py_)) press(SDLK_RETURN);
         else m->hide();
@@ -457,7 +602,7 @@ void Home::pointer_up() {
 }
 
 void Home::wheel(int steps) {
-    if (tile_menu_.open || inputs_menu_.open || moving_) {
+    if (settings_.open || tile_menu_.open || inputs_menu_.open || moving_) {
         press(steps > 0 ? SDLK_UP : SDLK_DOWN);
         return;
     }
@@ -504,7 +649,8 @@ Home::MenuResult Home::menu_key(Menu &m, SDL_Keycode key) {
 
 void Home::menu_pointer(Menu &m, float x, float y) {
     if (!inside(m.rect, x, y)) return;
-    int i = int((y - m.rect.y - kMenuPad) / kMenuRowH);
+    float header = m.title.id ? kMenuTitleH : 0;
+    int i = int(std::floor((y - m.rect.y - header - kMenuPad) / kMenuRowH));
     if (i >= 0 && i < int(m.rows.size()) && i != m.focus) {
         m.focus = i;
         m.highlight.target = float(i);
@@ -515,18 +661,24 @@ void Home::draw_menu(Painter &p, Menu &m, float x, float y, float width, float a
     float a = std::clamp(m.anim.x, 0.f, 1.f) * alpha;
     if (a < 0.01f) return;
     // Drops in a little as it opens.
-    Rect panel{x, y - 18 * (1 - a), width, 2 * kMenuPad + m.rows.size() * kMenuRowH};
+    float header = m.title.id ? kMenuTitleH : 0;
+    Rect panel{x, y - 18 * (1 - a), width, header + 2 * kMenuPad + m.rows.size() * kMenuRowH};
     m.rect = panel;
     p.shadow(panel, kMenuRadius, 40, rgb(0x000000, 0.45f), a);
     p.glass(panel, kMenuRadius, rgb(0x0b1016, 0.45f), a);
+    if (m.title.id) {
+        p.text(std::round(panel.x + kMenuPad + 26), std::round(panel.y + (header - m.title.h) / 2 + 8), m.title,
+               rgb(0xffffff), a);
+    }
+    float top = panel.y + header;
 
-    Rect highlight{panel.x + kMenuPad, panel.y + kMenuPad + m.highlight.x * kMenuRowH, panel.w - 2 * kMenuPad,
+    Rect highlight{panel.x + kMenuPad, top + kMenuPad + m.highlight.x * kMenuRowH, panel.w - 2 * kMenuPad,
                    kMenuRowH};
     p.fill(highlight, kMenuRadius - kMenuPad, rgb(0xffffff), rgb(0xffffff), a);
 
     for (size_t i = 0; i < m.rows.size(); i++) {
         const Menu::Row &row = m.rows[i];
-        float ry = panel.y + kMenuPad + i * kMenuRowH;
+        float ry = top + kMenuPad + i * kMenuRowH;
         // How much the highlight covers this row: text turns dark under it.
         float lit = std::clamp(1 - std::abs(m.highlight.x - float(i)), 0.f, 1.f);
         Color text = {1 - 0.9f * lit, 1 - 0.9f * lit, 1 - 0.88f * lit, 1};
@@ -553,6 +705,7 @@ void Home::refresh_clock() {
     localtime_r(&now, &local);
     if (local.tm_min == clock_minute_) return;
     clock_minute_ = local.tm_min;
+    night_.target = night_now() ? 1 : 0;
     char text[16];
     std::strftime(text, sizeof text, "%-I:%M %p", &local);
     destroy(clock_);
@@ -589,7 +742,7 @@ void Home::update(float dt) {
 
         // While the pointer rests on the focused tile, it leans toward it.
         float lx = 0, ly = 0;
-        bool menus = tile_menu_.open || inputs_menu_.open;
+        bool menus = tile_menu_.open || inputs_menu_.open || settings_.open;
         if (pointer_ && !menus && !moving_ && row == row_ && col == col_) {
             Rect r = slot;
             r.y -= scroll_.x;
@@ -605,11 +758,12 @@ void Home::update(float dt) {
         t.lean_y.step(dt, kLeanStiffness, kLeanDamping);
     }
     pill_focus_.step(dt, kFocusStiffness, kFocusDamping);
-    for (Menu *m : {&inputs_menu_, &tile_menu_}) {
+    for (Menu *m : {&inputs_menu_, &tile_menu_, &settings_}) {
         m->anim.step(dt, kFocusStiffness, kFocusDamping);
         m->highlight.step(dt, kFocusStiffness, kFocusDamping);
     }
     wiggle_.step(dt, kFocusStiffness, kFocusDamping);
+    night_.step(dt, kScrollStiffness * 0.3f, kScrollDamping * 0.6f);  // a slow fade
     scroll_.step(dt, kScrollStiffness, kScrollDamping);
     grid_.step(dt, kScrollStiffness, kScrollDamping);
     refresh_clock();
@@ -668,17 +822,30 @@ void Home::render(Painter &p) {
     float g = std::clamp(grid_.x, 0.f, 1.f);
     Rect screen{0, 0, float(w_), float(h_)};
 
-    p.set_backdrop(wallpaper_.blurred);
-    // Wallpaper, crossfading to its blurred copy and dimming in the grid.
+    float n = std::clamp(night_.x, 0.f, 1.f);
+    bool night_image = night_wallpaper_.sharp.id != 0;
+    p.set_backdrop(night_image && n > 0.5f ? night_wallpaper_.blurred : wallpaper_.blurred);
+    // Wallpaper, crossfading to its blurred copy and dimming in the grid; at
+    // night, the night wallpaper fades in over it, or the day one dims.
     p.image(screen, 0, wallpaper_.sharp);
     p.image(screen, 0, wallpaper_.blurred, {1, 1, 1, 1}, g);
+    if (night_image) {
+        p.image(screen, 0, night_wallpaper_.sharp, {1, 1, 1, 1}, n);
+        p.image(screen, 0, night_wallpaper_.blurred, {1, 1, 1, 1}, n * g);
+    } else {
+        p.fill(screen, 0, rgb(0x050a1a, 0.45f), rgb(0x050a1a, 0.55f), n);
+    }
 
-    // Glass dock behind the first row, dimmed with the wallpaper in the grid.
+    // Glass dock behind the first row, dimmed with the wallpaper in the grid;
+    // smoky rather than milky at night.
     Rect first = tile_rect(0, 0), last = tile_rect(0, kCols - 1);
     Rect dock{first.x - kDockPad, first.y - kDockPad - scroll_.x, last.x + last.w - first.x + 2 * kDockPad,
               kTileH + 2 * kDockPad};
     p.shadow(dock, 46, 40, rgb(0x000000, 0.25f));
-    p.glass(dock, 46, rgb(0xffffff, 0.12f));
+    Color day_glass = rgb(0xffffff, 0.12f), night_glass = rgb(0x0b1016, 0.40f);
+    Color glass{day_glass.r + (night_glass.r - day_glass.r) * n, day_glass.g + (night_glass.g - day_glass.g) * n,
+                day_glass.b + (night_glass.b - day_glass.b) * n, day_glass.a + (night_glass.a - day_glass.a) * n};
+    p.glass(dock, 46, glass);
     p.fill(screen, 0, rgb(0x000000, 0.35f), rgb(0x000000, 0.45f), g);
 
     // Unfocused tiles first, so the focused one is drawn over its neighbours.
@@ -709,7 +876,8 @@ void Home::render(Painter &p) {
            inputs_label_, label, alpha);
 
     // Menus over everything, with the screen dimmed behind them.
-    float dim = std::max(std::clamp(inputs_menu_.anim.x, 0.f, 1.f), std::clamp(tile_menu_.anim.x, 0.f, 1.f));
+    float dim = std::max({std::clamp(inputs_menu_.anim.x, 0.f, 1.f), std::clamp(tile_menu_.anim.x, 0.f, 1.f),
+                          std::clamp(settings_.anim.x, 0.f, 1.f)});
     if (dim > 0.01f) {
         p.fill(screen, 0, rgb(0x000000, 0.30f), rgb(0x000000, 0.30f), dim);
         // The tile being edited stays bright above the dimming.
@@ -726,4 +894,6 @@ void Home::render(Painter &p) {
         if (my + mh > h_ - 20) my = t.y - 28 - mh;
         draw_menu(p, tile_menu_, t.x, my, kTileMenuW, 1);
     }
+    float sh = kMenuTitleH + 2 * kMenuPad + settings_.rows.size() * kMenuRowH;
+    draw_menu(p, settings_, (w_ - kSettingsW) / 2, (h_ - sh) / 2, kSettingsW, 1);
 }

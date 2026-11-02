@@ -39,6 +39,31 @@ ssh lgtv 'cat > /tmp/qs.ipk && luna-send -n 1 luna://com.webos.appInstallService
   < settings/build/com.lgtvtweaks.settings_*_all.ipk
 ```
 
+## Home screen (`home/`)
+
+A tvOS-style home screen and the TV's default Home app: wallpaper, a glass dock of six favourites,
+all other apps in a grid below, and a status pill with the clock and an **Inputs** button. Native
+C++ with SDL2 and OpenGL ES 2, linked against the TV's own libraries; a steady 60 fps, about 20 MB
+of memory, and kept resident so the Home button brings it back instantly.
+
+- **Remote:** arrows move focus, OK opens. Hold OK (or press Play/Pause) on a tile to **Move** or
+  **Hide** it; while moving, the arrows carry it and OK or Back drops it. Back in the grid returns
+  to the dock.
+- **Magic Remote:** pointing focuses, clicking opens, the wheel scrolls a row at a time.
+- **Home Settings** (the gear tile): wallpaper, night wallpaper, appearance (automatic night from
+  7 PM to 7 AM, always day, always night), show hidden apps, reset layout.
+- **Your own wallpapers:** copy JPEGs (ideally 1920x1080) to `/var/lib/lgtv-home/wallpapers/` on
+  the TV, then pick them in Home Settings. The layout and settings live in
+  `/var/lib/lgtv-home/layout.json`.
+
+```sh
+cd home
+./build.py            # cross-build with the buildroot-nc4 toolchain, package the .ipk
+tools/key.sh -c /tmp/cap.png DOWN    # press remote keys over ssh and capture the screen
+```
+
+See [`home/PLAN.md`](home/PLAN.md) for how it works on the TV (jail, Luna, why not Flutter).
+
 ## TV scripts (`tv/`)
 
 Copied to `/var/lib/webosbrew/init.d/` on the TV, where the Homebrew Channel runs them at boot. Several LG settings only last until the next reboot or wake from standby, so these re-apply them.

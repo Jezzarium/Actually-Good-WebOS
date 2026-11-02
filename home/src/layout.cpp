@@ -33,6 +33,15 @@ bool Layout::load(const std::string &path) {
     if (!obj) return false;
     order = strings(obj, "order");
     hidden = strings(obj, "hidden");
+    auto text = [obj](const char *key, const char *fallback) {
+        json_object *v;
+        return json_object_object_get_ex(obj, key, &v) && json_object_is_type(v, json_type_string)
+                   ? std::string(json_object_get_string(v))
+                   : std::string(fallback);
+    };
+    wallpaper = text("wallpaper", "");
+    night_wallpaper = text("night_wallpaper", "");
+    appearance = text("appearance", "auto");
     json_object_put(obj);
     return true;
 }
@@ -41,6 +50,9 @@ bool Layout::save(const std::string &path) const {
     json_object *obj = json_object_new_object();
     json_object_object_add(obj, "order", array(order));
     json_object_object_add(obj, "hidden", array(hidden));
+    json_object_object_add(obj, "wallpaper", json_object_new_string(wallpaper.c_str()));
+    json_object_object_add(obj, "night_wallpaper", json_object_new_string(night_wallpaper.c_str()));
+    json_object_object_add(obj, "appearance", json_object_new_string(appearance.c_str()));
     // Write beside it and rename, so a crash never leaves half a file.
     std::string tmp = path + ".tmp";
     bool ok = json_object_to_file_ext(tmp.c_str(), obj, JSON_C_TO_STRING_PRETTY) == 0 &&
