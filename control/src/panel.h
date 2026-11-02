@@ -15,6 +15,7 @@
 
 #include <SDL.h>
 
+#include <ctime>
 #include <functional>
 #include <map>
 #include <memory>
@@ -89,6 +90,7 @@ private:
     Rect panel_rect() const;
     Texture icon(const std::string &name);
     Texture text(TTF_Font *font, const std::string &s);
+    void load_backdrop();  // again if Home saved a new one
     void draw_page(Painter &p, Page &page, float ox, float oy, float alpha);
     void draw_cell(Painter &p, Page &page, Cell &cell, float ox, float oy, float alpha);
 
@@ -114,5 +116,7 @@ private:
     float px_ = 0, py_ = 0;
 
     Texture toast_;
+    Texture backdrop_;  // Home's blurred wallpaper; none until Home has run
+    time_t backdrop_time_ = 0;
     float toast_time_ = 0;
 };

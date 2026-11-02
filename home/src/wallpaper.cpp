@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -119,9 +120,21 @@ std::vector<uint8_t> load_image(const std::string &path, int w, int h) {
     return out;
 }
 
+// Written beside and renamed over, so a reader never sees half a file.
+void save_backdrop(std::vector<uint8_t> &rgba, int w, int h, const std::string &path) {
+    SDL_Surface *s = SDL_CreateRGBSurfaceWithFormatFrom(rgba.data(), w, h, 32, w * 4, SDL_PIXELFORMAT_ABGR8888);
+    SDL_Surface *rgb = s ? SDL_ConvertSurfaceFormat(s, SDL_PIXELFORMAT_RGB24, 0) : nullptr;
+    std::string tmp = path + ".tmp";
+    if (!rgb || SDL_SaveBMP(rgb, tmp.c_str()) != 0 || std::rename(tmp.c_str(), path.c_str()) != 0) {
+        LOG("wallpaper: saving %s: %s", path.c_str(), SDL_GetError());
+    }
+    SDL_FreeSurface(rgb);
+    SDL_FreeSurface(s);
+}
+
 }  // namespace
 
-Wallpaper load_wallpaper(const std::string &path, int w, int h) {
+Wallpaper load_wallpaper(const std::string &path, int w, int h, const std::string &backdrop_path) {
     std::vector<uint8_t> rgba = load_image(path, w, h);
     if (rgba.empty()) rgba = to_rgba(gradient(w, h), w, h);
 
@@ -143,6 +156,8 @@ Wallpaper load_wallpaper(const std::string &path, int w, int h) {
         }
     }
     box_blur(small, bw, bh, 10);
-    wp.blurred = upload_rgba(to_rgba(small, bw, bh).data(), bw, bh);
+    std::vector<uint8_t> blurred = to_rgba(small, bw, bh);
+    wp.blurred = upload_rgba(blurred.data(), bw, bh);
+    if (!backdrop_path.empty()) save_backdrop(blurred, bw, bh, backdrop_path);
     return wp;
 }

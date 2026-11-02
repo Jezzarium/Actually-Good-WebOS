@@ -13,4 +13,6 @@ struct Wallpaper {
 };
 
 // An image file scaled to cover w x h; a generated gradient if it can't be loaded.
-Wallpaper load_wallpaper(const std::string &path, int w, int h);
+// The blurred copy is also saved to backdrop_path, if given, for the Control
+// Center's glass (an overlay can't see what's below it).
+Wallpaper load_wallpaper(const std::string &path, int w, int h, const std::string &backdrop_path = "");

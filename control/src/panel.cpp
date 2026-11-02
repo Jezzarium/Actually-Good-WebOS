@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include <sys/stat.h>
+
 namespace {
 
 // Drops from where Home's status pill ends (its right edge and bottom).
@@ -14,7 +16,10 @@ constexpr float kPanelW = 600, kPanelRight = 1839, kPanelTop = 142, kPanelRadius
 constexpr float kMaxHeight = 1080 - kPanelTop - 48;
 constexpr float kPad = 12, kGap = 12, kCellRadius = 18;
 constexpr float kInner = kPanelW - 2 * kPad;
-constexpr float kSliderH = 84, kTileH = 96, kButtonH = 76, kRowH = 72, kHeaderH = 72;
+constexpr float kSliderH = 84, kTileH = 96, kButtonH = 104, kRowH = 72, kHeaderH = 72;
+// Focused cells grow by this much on each side, and their corners with them,
+// so they stay concentric with the panel's.
+constexpr float kGrow = 4;
 constexpr float kIcon = 34, kTextLeft = 26;
 
 // The home screen's springs: quick, not bouncy.
@@ -53,6 +58,10 @@ const Section *section(const std::string &title) {
 }
 
 const char *kLgSettings = "com.palm.app.settings";
+
+// Home's blurred wallpaper (home/src/home.cpp saves it), behind the glass. An
+// overlay can't see what's below it, so over video it is the wallpaper still.
+const char *kBackdrop = "/tmp/lgtv-home-backdrop.bmp";
 
 bool inside(Rect r, float x, float y) { return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h; }
 
@@ -97,6 +106,7 @@ bool Panel::init(const std::string &font_dir, const std::string &icons_dir, Tv *
                              "chevron", "back", "check", "bluetooth", "headphones", "search"}) {
         icon(name);
     }
+    load_backdrop();
     stack_.push_back(std::make_unique<Page>());
     build(*stack_.back());
     height_.snap(stack_.back()->height);
@@ -205,8 +215,9 @@ void Panel::build(Page &page) {
         header.key = "header";
         header.icon = "back";
         header.label_text = page.title;
+        header.activate = [this]() { pop(); };
         header.rect = {kPad, kPad, kInner, kHeaderH};
-        add(header);
+        page.grid.push_back({add(header)});
         float y = kPad + kHeaderH;
         auto row = [&](Cell c) {
             c.rect = {kPad, y, kInner, kRowH};
@@ -341,7 +352,10 @@ void Panel::refresh(Cell &cell) {
         if (cell.type == Type::kTile) room = cell.rect.w - kTextLeft - kIcon - 18 - 16;
         if (!cell.icon.empty() && cell.type == Type::kRow) room -= kIcon + 18;
         if (cell.type == Type::kRow && (cell.chevron || !cell.value_text.empty() || !cell.id.empty())) room *= 0.6f;
-        TTF_Font *font = cell.type == Type::kTile ? small_font_ : cell.type == Type::kHeader ? title_font_ : label_font_;
+        TTF_Font *font = cell.type == Type::kTile     ? small_font_
+                         : cell.type == Type::kHeader ? title_font_
+                         : cell.type == Type::kButton ? value_font_
+                                                      : label_font_;
         cell.label = text(font, fit(font, cell.label_text, room));
     }
     std::string value = cell.value_text;
@@ -374,7 +388,8 @@ void Panel::push(Page::Kind kind, const std::string &title, const std::string &a
         bt_->set_active(true);
     }
     build(*page);
-    // A picker starts on the current value.
+    // On the first row under the header; a picker on the current value.
+    if (page->grid.size() > 1) page->row = 1;
     if (kind == Page::kPicker) {
         for (size_t r = 0; r < page->grid.size(); r++) {
             if (page->cells[page->grid[r][0]].check) page->row = int(r);
@@ -404,7 +419,27 @@ void Panel::pop() {
     slide_dir_ = -1;
 }
 
+void Panel::load_backdrop() {
+    struct stat st;
+    if (stat(kBackdrop, &st) != 0 || st.st_mtime == backdrop_time_) return;
+    backdrop_time_ = st.st_mtime;
+    SDL_Surface *s = IMG_Load(kBackdrop);
+    if (!s) {
+        LOG("panel: %s: %s", kBackdrop, IMG_GetError());
+        return;
+    }
+    if (SDL_Surface *rgba = SDL_ConvertSurfaceFormat(s, SDL_PIXELFORMAT_ABGR8888, 0)) {
+        if (rgba->pitch == rgba->w * 4) {
+            destroy(backdrop_);
+            backdrop_ = upload_rgba(rgba->pixels, rgba->w, rgba->h);
+        }
+        SDL_FreeSurface(rgba);
+    }
+    SDL_FreeSurface(s);
+}
+
 void Panel::open() {
+    load_backdrop();
     while (stack_.size() > 1) stack_.pop_back();
     bt_->set_active(false);
     Page &main = *stack_.back();
@@ -563,9 +598,15 @@ void Panel::pointer_move(float x, float y) {
     Rect pr = panel_rect();
     for (size_t r = 0; r < page.grid.size(); r++) {
         for (size_t c = 0; c < page.grid[r].size(); c++) {
-            Rect cr = page.cells[page.grid[r][c]].rect;
+            const Cell &cell = page.cells[page.grid[r][c]];
+            Rect cr = cell.rect;
             cr.x += pr.x;
-            cr.y += pr.y - page.scroll.x;
+            cr.y += pr.y;
+            // Rows scroll under the fixed header.
+            if (cell.type != Type::kHeader) {
+                if (page.list && y < pr.y + kPad + kHeaderH) continue;
+                cr.y -= page.scroll.x;
+            }
             if (inside(cr, x, y) && (int(r) != page.row || int(c) != page.col)) set_focus(int(r), int(c));
         }
     }
@@ -649,15 +690,18 @@ void Panel::draw_cell(Painter &p, Page &page, Cell &cell, float ox, float oy, fl
     // In lists the sliding highlight is the focus; elsewhere each cell lights up.
     float lit = f;
     if (page.list) {
-        float row_y = cell.rect.y;
-        lit = cell.type == Type::kHeader ? 0 : std::clamp(1 - std::abs(page.highlight.x - row_y) / kRowH, 0.f, 1.f);
+        // The header doesn't scroll; the highlight is drawn scrolled.
+        float row_y = cell.type == Type::kHeader ? cell.rect.y + page.scroll.x : cell.rect.y;
+        lit = std::clamp(1 - std::abs(page.highlight.x - row_y) / kRowH, 0.f, 1.f);
     }
 
+    float radius = kCellRadius;
     if (!page.list && cell.type != Type::kHeader) {
         // Grows by the same few pixels whatever its width, so wide cells stay inside the panel.
-        r = r.inset(-4 * f);
-        if (f > 0.01f) p.shadow(r, kCellRadius, 18, rgb(0x000000, 0.35f), f * a);
-        p.fill(r, kCellRadius, mix(rgb(0xffffff, 0.10f), rgb(0xffffff), f), mix(rgb(0xffffff, 0.08f), rgb(0xffffff), f), a);
+        r = r.inset(-kGrow * f);
+        radius += kGrow * f;
+        if (f > 0.01f) p.shadow(r, radius, 18, rgb(0x000000, 0.35f), f * a);
+        p.fill(r, radius, mix(rgb(0xffffff, 0.10f), rgb(0xffffff), f), mix(rgb(0xffffff, 0.08f), rgb(0xffffff), f), a);
     }
     if (cell.type == Type::kSlider) {
         const Setting &s = tv_->get(cell.id);
@@ -666,7 +710,7 @@ void Panel::draw_cell(Painter &p, Page &page, Cell &cell, float ox, float oy, fl
         // Never narrower than it is tall, so the end stays round.
         Rect level{r.x, r.y, std::max(r.h, r.w * std::clamp(fraction, 0.f, 1.f)), r.h};
         Color tint = mix(rgb(0xffffff, 0.16f), rgb(0x000000, 0.10f), lit);
-        if (!s.value.empty()) p.fill(level, kCellRadius, tint, tint, a);
+        if (!s.value.empty()) p.fill(level, radius, tint, tint, a);
     }
 
     Color c = ink(lit);
@@ -682,8 +726,8 @@ void Panel::draw_cell(Painter &p, Page &page, Cell &cell, float ox, float oy, fl
         return;
     }
     if (cell.type == Type::kHeader) {
-        if (ic.id) p.image({r.x + 14, std::round(cy - kIcon / 2), kIcon, kIcon}, 0, ic, ink(0, 0.7f), a);
-        p.text(std::round(r.x + 14 + kIcon + 12), std::round(cy - cell.label.h / 2), cell.label, ink(0), a);
+        if (ic.id) p.image({r.x + 14, std::round(cy - kIcon / 2), kIcon, kIcon}, 0, ic, ink(lit, 0.7f + 0.3f * lit), a);
+        p.text(std::round(r.x + 14 + kIcon + 12), std::round(cy - cell.label.h / 2), cell.label, c, a);
         return;
     }
     if (ic.id) {
@@ -729,10 +773,6 @@ void Panel::draw_cell(Painter &p, Page &page, Cell &cell, float ox, float oy, fl
 }
 
 void Panel::draw_page(Painter &p, Page &page, float ox, float oy, float alpha) {
-    if (page.list && !page.grid.empty()) {
-        Rect h{ox + kPad, oy + page.highlight.x - page.scroll.x, kInner, kRowH};
-        p.fill(h, kCellRadius, rgb(0xffffff), rgb(0xffffff), alpha);
-    }
     for (Cell &c : page.cells) {
         if (c.type == Type::kHeader) continue;
         draw_cell(p, page, c, ox, oy - page.scroll.x, alpha);
@@ -745,19 +785,30 @@ void Panel::render(Painter &p) {
     Page &page = *stack_.back();
     Rect pr = panel_rect();
 
+    // The same glass as Home's menus.
     p.shadow(pr, kPanelRadius, 40, rgb(0x000000, 0.45f), a);
-    // A rim of light around dark smoked glass: there is no wallpaper to blur
-    // over video, so the glass is a tint.
-    p.fill(pr, kPanelRadius, rgb(0xffffff, 0.16f), rgb(0xffffff, 0.06f), a);
-    p.fill(pr.inset(1.5f), kPanelRadius - 1.5f, rgb(0x1b2029, 0.90f), rgb(0x0f1217, 0.92f), a);
+    if (backdrop_.id) {
+        p.set_backdrop(backdrop_);
+        p.glass(pr, kPanelRadius, rgb(0x0b1016, 0.45f), a);
+    } else {
+        // Home hasn't run since the TV started: a rim of light around dark smoked glass.
+        p.fill(pr, kPanelRadius, rgb(0xffffff, 0.16f), rgb(0xffffff, 0.06f), a);
+        p.fill(pr.inset(1.5f), kPanelRadius - 1.5f, rgb(0x1b2029, 0.90f), rgb(0x0f1217, 0.92f), a);
+    }
 
     float s = std::clamp(slide_.x, 0.f, 1.f);
     float ox = pr.x + slide_dir_ * (1 - s) * 40, oy = pr.y;
     float pa = a * (0.3f + 0.7f * s);
 
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(int(pr.x), int(1080 - (pr.y + pr.h)), int(pr.w), int(pr.h));
+    // The list's highlight, over the header too (rows only pass under it).
+    if (page.list && !page.grid.empty()) {
+        Rect h{ox + kPad, oy + page.highlight.x - page.scroll.x, kInner, kRowH};
+        p.fill(h, kCellRadius, rgb(0xffffff), rgb(0xffffff), pa);
+    }
     // Lists scroll under a fixed header; clip to the panel.
     float top = page.list ? kPad + kHeaderH : 0;
-    glEnable(GL_SCISSOR_TEST);
     glScissor(int(pr.x), int(1080 - (pr.y + pr.h)), int(pr.w), int(pr.h - top));
     draw_page(p, page, ox, oy, pa);
     glDisable(GL_SCISSOR_TEST);

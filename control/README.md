@@ -55,6 +55,14 @@ and changing the offsets and bytes in `overlay.cpp`.
   or closes it if it is open. The reload touches `/tmp/lgtv-control.preload` first, and a
   relaunch within 3 s of that is ignored, so a reload reaching a copy still running can't open it.
 
+## Glass
+
+An overlay can't read what is drawn below it, so the panel's glass shows Home's wallpaper:
+Home saves its blurred copy to `/tmp/lgtv-home-backdrop.bmp` (both apps' jails share the TV's
+`/tmp`) whenever it loads one, and the panel reloads it on opening if it changed. Over Home it
+matches Home's own menus; over video it is still the wallpaper. Until Home has run since the TV
+started, the panel is plain smoked glass.
+
 ## Measured
 
 `tools/latency/vis.sh com.lgtvtweaks.control` launches the app and captures the screen back to

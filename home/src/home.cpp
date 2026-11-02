@@ -52,6 +52,9 @@ const char *kControlCenter = "com.lgtvtweaks.control";
 // Wallpapers: bundled in assets/wallpapers, plus any the user copies here.
 const char *kUserWallpapers = "/var/lib/lgtv-home/wallpapers";
 const char *kDefaultWallpaper = "Beach.jpg";
+// The blurred wallpaper, for the Control Center's glass (control/src/panel.cpp
+// reads it). /tmp is the TV's own: both apps' jails share it.
+const char *kBackdrop = "/tmp/lgtv-home-backdrop.bmp";
 // Automatic appearance: night between these hours.
 constexpr int kNightFrom = 19, kNightTo = 7;
 
@@ -142,7 +145,7 @@ void Home::load_wallpaper_image() {
     destroy(wallpaper_.sharp);
     destroy(wallpaper_.blurred);
     wallpaper_ = load_wallpaper(wallpaper_path(layout_.wallpaper.empty() ? kDefaultWallpaper : layout_.wallpaper),
-                                w_, h_);
+                                w_, h_, kBackdrop);
 }
 
 bool Home::night_now() const {
