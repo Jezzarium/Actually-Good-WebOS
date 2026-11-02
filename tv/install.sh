@@ -44,8 +44,9 @@ done
 
 # A jail left empty by an earlier uninstall (see tv/uninstall.sh): clear it, so
 # the jailer sets it up from scratch.
+# Only empty folders go (rmdir), never files.
 tv 'J=/var/palm/jail/com.lgtvtweaks.home
-if [ -d $J ] && [ ! -e $J/bin ] && ! grep -q " $J/" /proc/mounts; then rm -rf $J; fi'
+[ -d $J ] && [ ! -e $J/bin ] && ! grep -q " $J/" /proc/mounts && find $J -depth -type d -exec rmdir {} \; 2>/dev/null; true'
 
 for app in "home $HOME_ID" "settings $SETTINGS_ID"; do
     set -- $app

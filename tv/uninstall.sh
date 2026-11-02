@@ -76,9 +76,21 @@ done
 # Home bind-mounts other apps' folders and /var/lib/lgtv-home into its jail
 # (kJailMounts in home/src/main.cpp). Unmount those first, so removing the
 # jail can't delete through them; the jailer's own mounts are its business.
+# Closing can take a moment (and LG Home may open it again), so stop whatever
+# still runs in the jail. Other apps' own mounts (an overlay per store app)
+# show up inside the binds, and in the same peer group as the real ones:
+# unmounting them there would also unmount the real ones. So make each bind
+# private first, then unmount deepest first, with -l when one is still busy.
 tv 'sleep 2; J=/var/palm/jail/com.lgtvtweaks.home
+in_jail() { for p in /proc/[0-9]*; do [ "$(readlink $p/root 2>/dev/null)" = $J ] && echo ${p#/proc/}; done; }
+for i in 1 2 3 4 5; do pids=$(in_jail); [ -z "$pids" ] && break; kill $pids 2>/dev/null; sleep 1; done
 for d in /var/lib/lgtv-home /media/cryptofs/apps/usr/palm/applications /mnt/otncabi/usr/palm/applications /usr/palm/applications; do
-    while grep -q " $J$d " /proc/mounts; do umount "$J$d" || { echo "cannot unmount $J$d" >&2; exit 1; }; done
+    grep -q " $J$d[ /]" /proc/mounts || continue
+    mount --make-rprivate "$J$d" || { echo "cannot make $J$d private" >&2; exit 1; }
+    for m in $(awk -v p="$J$d" "\$2 == p || index(\$2, p \"/\") == 1 { print \$2 }" /proc/mounts | sort -r); do
+        umount "$m" 2>/dev/null || umount -l "$m" 2>/dev/null || true
+    done
+    if grep -q " $J$d[ /]" /proc/mounts; then echo "cannot unmount $J$d" >&2; exit 1; fi
 done'
 for id in $HOME_ID $SETTINGS_ID; do
     luna luna://com.webos.appInstallService/dev/remove "{\"id\":\"$id\"}"
@@ -87,11 +99,13 @@ for id in $HOME_ID $SETTINGS_ID; do
     tv "for i in \$(seq 1 60); do [ -e /media/developer/apps/usr/palm/applications/$id ] || exit 0; sleep 1; done
         echo 'still installed: $id' >&2; exit 1"
 done
-# Removing the app tears down the jail but leaves the empty mount points the
-# app made for its own mounts. Delete them, once nothing is mounted there, so a
-# reinstall gets a jail set up from scratch.
+# Removing the app tears down the jail but leaves empty mount points (the
+# app's own and some of the jailer's). Remove them, so a reinstall gets a jail
+# set up from scratch. Only rmdir, which never deletes files: the jailer
+# unmounts lazily, so a folder can still be a mount point after it vanishes
+# from /proc/mounts, and rm -rf there could reach the real folder.
 tv 'J=/var/palm/jail/com.lgtvtweaks.home
-if [ -d $J ] && ! grep -q " $J/" /proc/mounts; then rm -rf $J; fi'
+[ -d $J ] && ! grep -q " $J/" /proc/mounts && find $J -depth -type d -exec rmdir {} \; 2>/dev/null; true'
 
 if [ -n "$purge" ]; then
     step "deleting /var/lib/lgtv-home"

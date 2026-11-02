@@ -35,16 +35,18 @@ const int kIconsTimeoutMs = 1000;
 // /tmp is writable. The jail's mounts live in the TV's main mount table, so
 // ask the Homebrew Channel's root exec service to bind the app folders in
 // read-only, and kDataDir (owned by the jail user) read-write. Idempotent;
-// gone at reboot.
+// gone at reboot. Each bind is made a slave: other apps' mounts (an overlay
+// per store app) still appear inside it, but unmounting it (tv/uninstall.sh)
+// can't propagate back and unmount the real ones.
 const char *kDataDir = "/var/lib/lgtv-home";
 const char *kJailMounts =
     "J=/var/palm/jail/com.lgtvtweaks.home; D=/var/lib/lgtv-home; "
     "for d in /media/cryptofs/apps/usr/palm/applications /mnt/otncabi/usr/palm/applications "
     "/usr/palm/applications; do "
     "mkdir -p $J$d && { grep -q \" $J$d \" /proc/mounts || "
-    "{ mount --bind $d $J$d && mount -o remount,bind,ro $J$d; }; }; done; "
+    "{ mount --bind $d $J$d && mount -o remount,bind,ro $J$d && mount --make-rslave $J$d; }; }; done; "
     "mkdir -p $D/wallpapers $J$D && chown -R 6067:5000 $D && "  // the jail's prisoner:jailer
-    "{ grep -q \" $J$D \" /proc/mounts || mount --bind $D $J$D; }";
+    "{ grep -q \" $J$D \" /proc/mounts || { mount --bind $D $J$D && mount --make-rslave $J$D; }; }";
 
 #ifdef HOME_WEBOS
 const char *kFont = "/usr/share/fonts/LG_Smart_UI-SemiBold.ttf";
