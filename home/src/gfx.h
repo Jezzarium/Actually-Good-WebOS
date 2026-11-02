@@ -48,9 +48,9 @@ public:
     void set_backdrop(const Texture &blurred) { backdrop_ = blurred; }
 
     void fill(Rect r, float radius, Color top, Color bottom, float opacity = 1);
-    // Gradient fill with a soft highlight at (sx, sy), in 0..1 of the rect.
-    void fill_shine(Rect r, float radius, Color top, Color bottom, float sx, float sy, float shine,
-                    float opacity = 1);
+    // A soft white highlight centred at (sx, sy), in 0..1 of the rect, drawn
+    // over whatever is already there (tile and icon alike).
+    void shine(Rect r, float radius, float sx, float sy, float strength);
     void image(Rect r, float radius, const Texture &t, Color tint = {1, 1, 1, 1}, float opacity = 1);
     // Text texture at its natural size with its top-left at (x, y).
     void text(float x, float y, const Texture &t, Color color, float opacity = 1);
@@ -60,7 +60,7 @@ public:
     void shadow(Rect r, float radius, float blur, Color color, float opacity = 1);
 
 private:
-    enum Mode { kFill = 0, kTexture = 1, kGlass = 2, kShadow = 3 };
+    enum Mode { kFill = 0, kTexture = 1, kGlass = 2, kShadow = 3, kShine = 4 };
     void draw(Mode mode, Rect quad, Rect shape, float radius, Color c0, Color c1, GLuint texture,
               float opacity, float blur = 0, float sx = 0, float sy = 0, float shine = 0);
 

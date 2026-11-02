@@ -27,7 +27,7 @@ precision highp float;
 uniform vec4 u_rect;
 uniform vec2 u_screen;
 uniform float u_radius;
-uniform int u_mode;        // 0 fill, 1 texture, 2 glass, 3 shadow
+uniform int u_mode;        // 0 fill, 1 texture, 2 glass, 3 shadow, 4 shine
 uniform vec4 u_c0;         // fill top / texture tint / glass tint / shadow colour
 uniform vec4 u_c1;         // fill bottom
 uniform sampler2D u_tex;
@@ -51,6 +51,11 @@ void main() {
         return;
     }
     float cover = clamp(0.5 - d, 0.0, 1.0);
+    if (u_mode == 4) {
+        vec2 p = (v_px / u_rect.zw - u_shine.xy) * vec2(1.0, u_rect.w / u_rect.z * 1.6);
+        gl_FragColor = vec4(1.0, 1.0, 1.0, exp(-dot(p, p) * 4.0) * u_shine.z * cover * u_opacity);
+        return;
+    }
     vec4 c;
     if (u_mode == 0) {
         c = mix(u_c0, u_c1, clamp(v_px.y / u_rect.w, 0.0, 1.0));
@@ -60,10 +65,6 @@ void main() {
         vec3 behind = texture2D(u_tex, v_screen / u_screen).rgb;
         c = vec4(mix(behind, u_c0.rgb, u_c0.a), 1.0);
         c.rgb += smoothstep(-2.5, 0.0, d) * 0.10;  // light catching the rim
-    }
-    if (u_shine.z > 0.0) {
-        vec2 p = (v_px / u_rect.zw - u_shine.xy) * vec2(1.0, u_rect.w / u_rect.z * 1.6);
-        c.rgb += exp(-dot(p, p) * 4.0) * u_shine.z;
     }
     gl_FragColor = vec4(c.rgb, c.a * cover * u_opacity);
 }
@@ -183,9 +184,9 @@ void Painter::fill(Rect r, float radius, Color top, Color bottom, float opacity)
     draw(kFill, r, r, radius, top, bottom, 0, opacity);
 }
 
-void Painter::fill_shine(Rect r, float radius, Color top, Color bottom, float sx, float sy,
-                         float shine, float opacity) {
-    draw(kFill, r, r, radius, top, bottom, 0, opacity, 0, sx, sy, shine);
+void Painter::shine(Rect r, float radius, float sx, float sy, float strength) {
+    if (strength <= 0.001f) return;
+    draw(kShine, r, r, radius, {1, 1, 1, 1}, {1, 1, 1, 1}, 0, 1, 0, sx, sy, strength);
 }
 
 void Painter::image(Rect r, float radius, const Texture &t, Color tint, float opacity) {

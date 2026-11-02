@@ -41,6 +41,37 @@ std::vector<App> apps_from_launch_points(json_object *reply, const std::string &
     return apps;
 }
 
+std::vector<Input> inputs_from_status(json_object *reply) {
+    std::vector<Input> inputs;
+    json_object *devices;
+    if (!json_object_object_get_ex(reply, "devices", &devices) || !json_object_is_type(devices, json_type_array)) {
+        return inputs;
+    }
+    for (size_t i = 0; i < json_object_array_length(devices); i++) {
+        json_object *dev = json_object_array_get_idx(devices, i);
+        Input input;
+        input.app_id = get_string(dev, "appId");
+        if (input.app_id.empty()) continue;
+        // "HDMI_2" -> "HDMI 2"
+        input.port = get_string(dev, "id");
+        for (char &c : input.port) {
+            if (c == '_') c = ' ';
+        }
+        input.label = get_string(dev, "label", input.port);
+        input.connected = get_bool(dev, "connected");
+        inputs.push_back(std::move(input));
+    }
+    return inputs;
+}
+
+std::vector<Input> placeholder_inputs() {
+    return {
+        {"HDMI 1", "HDMI 1", "com.webos.app.hdmi1", true},
+        {"SR7008", "HDMI 2", "com.webos.app.hdmi2", true},
+        {"HDMI 3", "HDMI 3", "com.webos.app.hdmi3", false},
+    };
+}
+
 std::vector<App> placeholder_apps() {
     return {
         {"youtube.leanback.v4", "YouTube", "", 0xd92b2b},

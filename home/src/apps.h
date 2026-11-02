@@ -21,3 +21,14 @@ struct App {
 std::vector<App> apps_from_launch_points(json_object *reply, const std::string &self_id);
 
 std::vector<App> placeholder_apps();
+
+// An external input (HDMI), from com.webos.service.eim/getAllInputStatus.
+struct Input {
+    std::string label;   // the device's name over CEC if it has one, else "HDMI 2"
+    std::string port;    // "HDMI 2"
+    std::string app_id;  // launching it switches to the input
+    bool connected;
+};
+
+std::vector<Input> inputs_from_status(json_object *reply);
+std::vector<Input> placeholder_inputs();

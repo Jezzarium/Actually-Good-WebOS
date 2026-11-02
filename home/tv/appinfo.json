@@ -13,5 +13,8 @@
   "noSplashOnLaunch": true,
   "spinnerOnLaunch": false,
   "handlesRelaunch": true,
-  "disableBackHistoryAPI": true
+  "disableBackHistoryAPI": true,
+  "appCategory": [
+    "home"
+  ]
 }

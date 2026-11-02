@@ -32,9 +32,9 @@ public:
     void render(Painter &p);
     // Replaces the apps, keeping focus on the same app where it still exists.
     void set_apps(const std::vector<App> &apps);
+    void set_inputs(const std::vector<Input> &inputs);
 
-    std::function<void(const std::string &app_id)> on_launch;
-    std::function<void()> on_inputs;
+    std::function<void(const std::string &app_id)> on_launch;  // apps and inputs alike
 
 private:
     // Focus rows: kPill is the status pill, 0 the dock, 1.. the grid rows.
@@ -56,6 +56,9 @@ private:
     // dx, dy: the direction pressed, for the lean (0, 0 when not from a key).
     void move_focus(int row, int col, int dx, int dy);
     void draw_tile(Painter &p, int row, int col);
+    // The inputs panel, hanging below the status pill.
+    void draw_inputs(Painter &p, Rect pill);
+    void inputs_key(SDL_Keycode key);
     void refresh_clock();
 
     int w_ = 0, h_ = 0;
@@ -69,4 +72,14 @@ private:
 
     Texture clock_, inputs_;
     int clock_minute_ = -1;
+
+    struct InputRow {
+        Input input;
+        Texture name, port;
+    };
+    std::vector<InputRow> input_rows_;
+    bool inputs_open_ = false;
+    int input_focus_ = 0;
+    Spring inputs_anim_;     // 0 closed .. 1 open
+    Spring input_highlight_; // row index, fractional while it slides
 };

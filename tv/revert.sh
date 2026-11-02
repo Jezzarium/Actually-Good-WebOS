@@ -9,7 +9,7 @@ ORIG=$(python3 -I -c 'import json; d=json.load(open("keyFilters_before.json")); 
 ssh lgtv "rm -f /var/lib/webosbrew/init.d/settings-key
 luna-send -n 1 luna://com.webos.service.config/setConfigs '$ORIG' </dev/null >/dev/null 2>&1; echo settings key restored"
 
-# 0a. Home button and power-on back to LG Home (Lumen stays installed; uninstall it from the TV's app list)
+# 0a. Home button and power-on back to LG Home (our home screen stays installed; uninstall it from the TV's app list)
 ssh lgtv 'rm -f /var/lib/webosbrew/init.d/default-home; [ -f /tmp/default-home.pid ] && kill $(cat /tmp/default-home.pid) 2>/dev/null
 luna-send -n 1 luna://com.webos.service.applicationmanager/setDefaultApp "{\"category\":\"home\",\"appId\":\"com.webos.app.home\"}" </dev/null >/dev/null 2>&1
 luna-send -n 1 luna://com.webos.settingsservice/setSystemSettings "{\"category\":\"general\",\"settings\":{\"homeAutoLaunch\":\"on\"}}" </dev/null >/dev/null 2>&1

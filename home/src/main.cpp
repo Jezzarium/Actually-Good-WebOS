@@ -9,6 +9,9 @@
 #include <SDL.h>
 #include <SDL_image.h>
 #include <SDL_ttf.h>
+#ifdef HOME_WEBOS
+#include <SDL_webOS.h>
+#endif
 
 #include <algorithm>
 #include <cstdlib>
@@ -60,6 +63,10 @@ int main(int argc, char **argv) {
         std::setvbuf(stderr, nullptr, _IONBF, 0);  // freopen makes it fully buffered
     }
 
+    // Back and Exit come to us instead of LG's "exit the app?" dialog: a home
+    // screen never exits.
+    SDL_SetHint("SDL_WEBOS_ACCESS_POLICY_KEYS_BACK", "true");
+    SDL_SetHint("SDL_WEBOS_ACCESS_POLICY_KEYS_EXIT", "true");
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0 || TTF_Init() != 0 ||
         !(IMG_Init(IMG_INIT_JPG | IMG_INIT_PNG) & IMG_INIT_JPG)) {
         LOG("init: %s", SDL_GetError());
@@ -127,6 +134,12 @@ int main(int argc, char **argv) {
                       list_apps();
                   });
         json_object_put(exec);
+
+        luna.subscribe("luna://com.webos.service.eim/getAllInputStatus", R"({"subscribe":true})",
+                       [&home](json_object *reply) {
+                           std::vector<Input> inputs = inputs_from_status(reply);
+                           if (!inputs.empty()) home.set_inputs(inputs);
+                       });
         home.on_launch = [&luna](const std::string &id) {
             LOG("home: launch %s", id.c_str());
             json_object *params = json_object_new_object();
@@ -142,7 +155,6 @@ int main(int argc, char **argv) {
     } else {
         LOG("home: no Luna bus, showing placeholder apps");
     }
-    home.on_inputs = [] { LOG("home: open inputs"); };
 
     Uint64 last = SDL_GetPerformanceCounter(), stats_start = last;
     int frames = 0;
@@ -151,7 +163,15 @@ int main(int argc, char **argv) {
         luna.pump();
         for (SDL_Event e; SDL_PollEvent(&e);) {
             if (e.type == SDL_QUIT) running = false;
-            if (e.type == SDL_KEYDOWN) home.key(e.key.keysym.sym);
+            if (e.type == SDL_KEYDOWN) {
+                SDL_Keycode key = e.key.keysym.sym;
+#ifdef HOME_WEBOS
+                // LG's remote keys have scancodes but no keycode.
+                int scancode = e.key.keysym.scancode;
+                if (scancode == SDL_WEBOS_SCANCODE_BACK || scancode == SDL_WEBOS_SCANCODE_EXIT) key = SDLK_AC_BACK;
+#endif
+                home.key(key);
+            }
         }
 
         Uint64 now = SDL_GetPerformanceCounter();

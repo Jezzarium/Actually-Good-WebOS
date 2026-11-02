@@ -32,6 +32,9 @@ constexpr float kLeanPixels = 7;
 // a full lean moves it.
 constexpr float kShineX = 0.5f, kShineY = -0.05f, kShineTravel = 0.55f;
 
+// Inputs panel.
+constexpr float kPanelW = 480, kPanelPad = 12, kInputRowH = 72, kPanelRadius = 30;
+
 Color shade(uint32_t hex, float k, float lift = 0) {
     Color c = rgb(hex);
     return {std::min(1.f, c.r * k + lift), std::min(1.f, c.g * k + lift), std::min(1.f, c.b * k + lift), 1};
@@ -64,7 +67,55 @@ bool Home::init(int w, int h, const char *font_path, const std::string &assets) 
     inputs_ = render_text(pill_font_, "Inputs");
     refresh_clock();
     set_apps(placeholder_apps());
+    set_inputs(placeholder_inputs());
     return true;
+}
+
+void Home::set_inputs(const std::vector<Input> &inputs) {
+    for (InputRow &row : input_rows_) {
+        destroy(row.name);
+        destroy(row.port);
+    }
+    input_rows_.clear();
+    for (const Input &input : inputs) {
+        InputRow row;
+        row.input = input;
+        row.name = render_text(pill_font_, input.label);
+        // The port only when the name doesn't already say it.
+        if (input.label != input.port) row.port = render_text(label_font_, input.port);
+        input_rows_.push_back(std::move(row));
+    }
+    input_focus_ = std::clamp(input_focus_, 0, std::max(0, int(input_rows_.size()) - 1));
+    if (input_rows_.empty()) inputs_open_ = false;
+    inputs_anim_.target = inputs_open_ ? 1 : 0;
+}
+
+void Home::inputs_key(SDL_Keycode key) {
+    int n = int(input_rows_.size());
+    switch (key) {
+    case SDLK_UP:
+    case SDLK_DOWN: {
+        int next = input_focus_ + (key == SDLK_DOWN ? 1 : -1);
+        if (next >= 0 && next < n) {
+            input_focus_ = next;
+            input_highlight_.target = float(next);
+        } else {
+            input_highlight_.v += (key == SDLK_DOWN ? 4 : -4);  // bump at the ends
+        }
+        break;
+    }
+    case SDLK_RETURN:
+        if (on_launch && input_focus_ < n) on_launch(input_rows_[input_focus_].input.app_id);
+        inputs_open_ = false;
+        break;
+    case SDLK_ESCAPE:
+    case SDLK_AC_BACK:
+    case SDLK_LEFT:
+        inputs_open_ = false;
+        break;
+    default: LOG("home: key %d", int(key)); break;
+    }
+    inputs_anim_.target = inputs_open_ ? 1 : 0;
 }
 
 void Home::set_apps(const std::vector<App> &apps) {
@@ -166,6 +217,10 @@ void Home::move_focus(int row, int col, int dx, int dy) {
 }
 
 void Home::key(SDL_Keycode key) {
+    if (inputs_open_) {
+        inputs_key(key);
+        return;
+    }
     switch (key) {
     case SDLK_LEFT: move_focus(row_, col_ - 1, -1, 0); break;
     case SDLK_RIGHT: move_focus(row_, col_ + 1, 1, 0); break;
@@ -177,7 +232,11 @@ void Home::key(SDL_Keycode key) {
         break;
     case SDLK_RETURN:
         if (row_ == kPill) {
-            if (on_inputs) on_inputs();
+            if (!input_rows_.empty()) {
+                inputs_open_ = true;
+                inputs_anim_.target = 1;
+                input_highlight_.snap(float(input_focus_));
+            }
         } else if (on_launch) {
             on_launch(tiles_[tile_index(row_, col_)].app.id);
         }
@@ -206,6 +265,8 @@ void Home::update(float dt) {
         t.lean_y.step(dt, kLeanStiffness, kLeanDamping);
     }
     pill_focus_.step(dt, kFocusStiffness, kFocusDamping);
+    inputs_anim_.step(dt, kFocusStiffness, kFocusDamping);
+    input_highlight_.step(dt, kFocusStiffness, kFocusDamping);
     scroll_.step(dt, kScrollStiffness, kScrollDamping);
     grid_.step(dt, kScrollStiffness, kScrollDamping);
     refresh_clock();
@@ -233,7 +294,8 @@ void Home::draw_tile(Painter &p, int row, int col) {
     // A gentle vertical gradient, flat where it has to meet the icon's edge.
     Color top = seamless ? rgb(color) : shade(color, 1.15f, 0.06f);
     Color bottom = seamless ? rgb(color) : shade(color, 0.85f);
-    p.fill_shine(s, kRadius * (1 + kFocusScale * f), top, bottom, sx, sy, 0.22f * f);
+    float radius = kRadius * (1 + kFocusScale * f);
+    p.fill(s, radius, top, bottom);
 
     float k = 1 + kFocusScale * f;
     Texture icon = icons_.get(tile.app.icon);
@@ -246,6 +308,8 @@ void Home::draw_tile(Painter &p, int row, int col) {
                   tile.name.h * k};
         p.image(name, 0, tile.name, rgb(0xffffff));
     }
+    // Over the icon too, so the whole tile catches the light like a sheet of glass.
+    p.shine(s, radius, sx, sy, 0.24f * f);
 
     if (row >= 1) {
         p.text(std::round(r.x + (r.w - tile.label.w) / 2), std::round(s.y + s.h + 14), tile.label,
@@ -261,14 +325,14 @@ void Home::render(Painter &p) {
     // Wallpaper, crossfading to its blurred copy and dimming in the grid.
     p.image(screen, 0, wallpaper_.sharp);
     p.image(screen, 0, wallpaper_.blurred, {1, 1, 1, 1}, g);
-    p.fill(screen, 0, rgb(0x000000, 0.35f), rgb(0x000000, 0.45f), g);
 
-    // Glass dock behind the first row.
+    // Glass dock behind the first row, dimmed with the wallpaper in the grid.
     Rect first = tile_rect(0, 0), last = tile_rect(0, kCols - 1);
     Rect dock{first.x - kDockPad, first.y - kDockPad - scroll_.x, last.x + last.w - first.x + 2 * kDockPad,
               kTileH + 2 * kDockPad};
     p.shadow(dock, 46, 40, rgb(0x000000, 0.25f));
     p.glass(dock, 46, rgb(0xffffff, 0.12f));
+    p.fill(screen, 0, rgb(0x000000, 0.35f), rgb(0x000000, 0.45f), g);
 
     // Unfocused tiles first, so the focused one is drawn over its neighbours.
     for (int pass = 0; pass < 2; pass++) {
@@ -297,4 +361,41 @@ void Home::render(Painter &p) {
     p.fill(b, b.h / 2, rgb(0xffffff, 0.10f + 0.90f * pf), rgb(0xffffff, 0.10f + 0.90f * pf), alpha);
     Color label = {1 - 0.9f * pf, 1 - 0.9f * pf, 1 - 0.88f * pf, 1};
     p.text(std::round(b.x + (b.w - inputs_.w) / 2), std::round(b.y + (b.h - inputs_.h) / 2), inputs_, label, alpha);
+
+    draw_inputs(p, pill);
+}
+
+void Home::draw_inputs(Painter &p, Rect pill) {
+    float a = std::clamp(inputs_anim_.x, 0.f, 1.f);
+    if (a < 0.01f) return;
+    Rect screen{0, 0, float(w_), float(h_)};
+    p.fill(screen, 0, rgb(0x000000, 0.30f), rgb(0x000000, 0.30f), a);
+
+    float h = 2 * kPanelPad + input_rows_.size() * kInputRowH;
+    // Drops down a little from under the pill as it opens.
+    Rect panel{pill.x + pill.w - kPanelW, pill.y + pill.h + 14 - 18 * (1 - a), kPanelW, h};
+    p.shadow(panel, kPanelRadius, 40, rgb(0x000000, 0.45f), a);
+    p.glass(panel, kPanelRadius, rgb(0x0b1016, 0.45f), a);
+
+    float hy = panel.y + kPanelPad + input_highlight_.x * kInputRowH;
+    Rect highlight{panel.x + kPanelPad, hy, panel.w - 2 * kPanelPad, kInputRowH};
+    p.fill(highlight, kPanelRadius - kPanelPad, rgb(0xffffff), rgb(0xffffff), a);
+
+    for (size_t i = 0; i < input_rows_.size(); i++) {
+        const InputRow &row = input_rows_[i];
+        float y = panel.y + kPanelPad + i * kInputRowH;
+        // How much the highlight covers this row: text turns dark under it.
+        float lit = std::clamp(1 - std::abs(input_highlight_.x - float(i)), 0.f, 1.f);
+        Color text = {1 - 0.9f * lit, 1 - 0.9f * lit, 1 - 0.88f * lit, 1};
+
+        Rect dot{panel.x + kPanelPad + 26, y + (kInputRowH - 12) / 2, 12, 12};
+        p.fill(dot, 6, rgb(row.input.connected ? 0x30d158 : 0x8e8e93), rgb(row.input.connected ? 0x30d158 : 0x8e8e93), a);
+        float x = dot.x + dot.w + 18;
+        p.text(std::round(x), std::round(y + (kInputRowH - row.name.h) / 2), row.name, text, a);
+        if (row.port.id) {
+            Color dim = {text.r, text.g, text.b, 0.6f};
+            p.text(std::round(panel.x + panel.w - kPanelPad - 26 - row.port.w),
+                   std::round(y + (kInputRowH - row.port.h) / 2), row.port, dim, a);
+        }
+    }
 }
