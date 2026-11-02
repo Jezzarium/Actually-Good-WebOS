@@ -1,3 +1,0 @@
-# Domains own-your-glass may NOT block (one per line). Picked up within a minute.
-# LG Content Store (app installs and updates)
-lgappstv.com

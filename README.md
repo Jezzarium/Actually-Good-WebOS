@@ -94,11 +94,10 @@ Copied to `/var/lib/webosbrew/init.d/` on the TV, where the Homebrew Channel run
 | `settings-key` + `settingskey.js` | Adds a key handler to surface-manager (`com.webos.surfacemanager.keyFilters`) so the Settings button opens Quick Settings, and preloads the app hidden. No system files are patched. |
 | `default-home` | Opens the default Home app at power-on and keeps LG's home out of memory while something else is the default. |
 | `trim-preloads` | Stops LG's preload manager keeping unused apps (browser, voice, Prime Video, Netflix, Live TV, LG Channels) in memory, at boot and after every wake. |
-| `oyg-allow` + `dns-allow.txt` | An allowlist for [own-your-glass](https://github.com/JulioFerrero/own-your-glass)'s DNS blocking (keeps the LG Content Store working). |
 
-`settingskey.js` and `dns-allow.txt` live in `/var/lib/lgtv-tweaks/` on the TV.
+`settingskey.js` lives in `/var/lib/lgtv-tweaks/` on the TV.
 
-`tv/revert.sh` undoes everything: Settings button, Home and power-on, the keep-alive list, preloads, the allowlist, own-your-glass, and the privacy settings changed along the way. It uses the saved originals in `tv/*_before.json`. The apps themselves stay installed; remove them from the TV's app list (and `/var/lib/lgtv-home` for the home screen's layout and wallpapers).
+`tv/revert.sh` undoes everything: Settings button, Home and power-on, the keep-alive list, preloads, and the privacy settings changed along the way. It uses the saved originals in `tv/*_before.json`. The apps themselves stay installed; remove them from the TV's app list (and `/var/lib/lgtv-home` for the home screen's layout and wallpapers).
 
 ## Notes for working on the TV
 
@@ -110,7 +109,6 @@ Copied to `/var/lib/webosbrew/init.d/` on the TV, where the Homebrew Channel run
 ## Credits
 
 - [Lumen](https://github.com/ammar027/lumen-webos) (MIT): reference for the home screen and for proven Luna calls. No code copied.
-- [own-your-glass](https://github.com/JulioFerrero/own-your-glass) (MIT): installed alongside for privacy hardening.
 - [buildroot-nc4](https://github.com/openlgtv/buildroot-nc4): the webOS cross-compiler the home screen is built with.
 - Wallpapers: Big Sur is Apple's macOS Big Sur wallpaper; Beach is an aerial beach photo.
 

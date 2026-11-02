@@ -20,15 +20,8 @@ echo home restored'
 KEEP=$(python3 -I -c 'import json; print(json.dumps(json.load(open("keepAlive_before.json")), separators=(",", ":")))')
 ssh lgtv "luna-send -n 1 luna://com.webos.service.config/setConfigs '$KEEP' </dev/null >/dev/null 2>&1; echo keep-alive restored"
 
-# 0b-pre. DNS allowlist (own-your-glass's restore below regenerates nothing, so just stop pruning)
-ssh lgtv 'rm -f /var/lib/webosbrew/init.d/oyg-allow; rm -rf /var/lib/lgtv-tweaks; [ -f /tmp/oyg-allow.pid ] && kill $(cat /tmp/oyg-allow.pid) 2>/dev/null; echo allowlist removed'
-
-# 0b. own-your-glass: same as its app's "Undo hardening". Undoing Variant C restarts
-# ConnMan (Wi-Fi drops briefly), so run it detached and wait for it.
-ssh lgtv 'F="OYG_NETWORK_BLOCK=1 OYG_NETWORK_STRICT=1 OYG_NETWORK_IPBLOCK=1 OYG_DNS_OVERRIDE=1 OYG_DNS_RESOLVER=1"
-nohup sh -c "$F sh /var/lib/own-your-glass/oyg restore; echo EXIT=\$?" </dev/null >/tmp/oyg-restore.log 2>&1 &'
-until ssh -o ConnectTimeout=5 lgtv 'grep -q "^EXIT=" /tmp/oyg-restore.log' 2>/dev/null; do sleep 5; done
-echo "own-your-glass restored"
+# 0b. Our tweaks directory (settingskey.js)
+ssh lgtv 'rm -rf /var/lib/lgtv-tweaks; echo tweaks removed'
 
 # 1. Hosts blocking
 ssh lgtv 'rm -f /var/lib/webosbrew/init.d/block-telemetry /var/lib/webosbrew/telemetry-blocklist.txt /var/lib/webosbrew/hosts.blocked
