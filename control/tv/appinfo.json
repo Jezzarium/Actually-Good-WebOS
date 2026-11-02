@@ -1,0 +1,19 @@
+{
+  "id": "com.lgtvtweaks.control",
+  "version": "0.1.0",
+  "vendor": "lgtvtweaks",
+  "type": "native",
+  "main": "bin/control",
+  "title": "Control Center",
+  "appDescription": "Picture, sound and power settings over whatever is playing.",
+  "icon": "icon.png",
+  "largeIcon": "largeIcon.png",
+  "iconColor": "#1c1c22",
+  "bgColor": "#000000",
+  "defaultWindowType": "overlay",
+  "noSplashOnLaunch": true,
+  "spinnerOnLaunch": false,
+  "handlesRelaunch": true,
+  "nativeLifeCycleInterfaceVersion": 2,
+  "disableBackHistoryAPI": true
+}

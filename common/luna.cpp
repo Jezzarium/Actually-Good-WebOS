@@ -2,14 +2,14 @@
 
 #include "log.h"
 
-#ifdef HOME_WEBOS
+#ifdef LGTV_WEBOS
 #include <glib.h>
 #include <luna-service2/lunaservice.h>
 #endif
 
 namespace {
 
-#ifdef HOME_WEBOS
+#ifdef LGTV_WEBOS
 struct Pending {
     Luna::Reply reply;
     bool once;
@@ -37,7 +37,7 @@ void report(const char *what, LSError &err) {
 }  // namespace
 
 bool Luna::connect(const char *app_id) {
-#ifdef HOME_WEBOS
+#ifdef LGTV_WEBOS
     LSError err;
     LSErrorInit(&err);
     LSHandle *sh = nullptr;
@@ -64,7 +64,7 @@ bool Luna::connect(const char *app_id) {
 }
 
 void Luna::call(const std::string &uri, const std::string &payload, Reply on_reply) {
-#ifdef HOME_WEBOS
+#ifdef LGTV_WEBOS
     if (!handle_) return;
     LSError err;
     LSErrorInit(&err);
@@ -80,7 +80,7 @@ void Luna::call(const std::string &uri, const std::string &payload, Reply on_rep
 }
 
 void Luna::subscribe(const std::string &uri, const std::string &payload, Reply on_reply) {
-#ifdef HOME_WEBOS
+#ifdef LGTV_WEBOS
     if (!handle_) return;
     LSError err;
     LSErrorInit(&err);
@@ -96,7 +96,7 @@ void Luna::subscribe(const std::string &uri, const std::string &payload, Reply o
 }
 
 void Luna::pump() {
-#ifdef HOME_WEBOS
+#ifdef LGTV_WEBOS
     while (g_main_context_iteration(nullptr, FALSE)) {
     }
 #endif

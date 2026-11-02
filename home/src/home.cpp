@@ -46,6 +46,9 @@ constexpr float kWiggleAngle = 0.035f, kWiggleSpeed = 15;
 constexpr float kMenuPad = 12, kMenuRowH = 72, kMenuRadius = 30;
 constexpr float kInputsW = 480, kTileMenuW = 300, kSettingsW = 820, kMenuTitleH = 92;
 
+// The Control Center (control/): an overlay app, opened by the pill's middle button.
+const char *kControlCenter = "com.lgtvtweaks.control";
+
 // Wallpapers: bundled in assets/wallpapers, plus any the user copies here.
 const char *kUserWallpapers = "/var/lib/lgtv-home/wallpapers";
 const char *kDefaultWallpaper = "Beach.jpg";
@@ -62,15 +65,6 @@ bool inside(Rect r, float x, float y) {
 }
 
 }  // namespace
-
-void Spring::step(float dt, float stiffness, float damping) {
-    // Small fixed substeps keep the integration stable at any frame time.
-    for (float left = dt; left > 0; left -= 1.f / 240) {
-        float h = std::min(left, 1.f / 240);
-        v += ((target - x) * stiffness - v * damping) * h;
-        x += v * h;
-    }
-}
 
 void Home::Menu::show() {
     open = true;
@@ -240,7 +234,7 @@ void Home::set_layout_path(const std::string &path) {
 }
 
 void Home::load_icons_now(int timeout_ms) {
-    std::vector<std::string> paths{assets_ + "/icons/settings.png"};
+    std::vector<std::string> paths{assets_ + "/icons/settings.png", assets_ + "/icons/control.png"};
     for (const Tile &t : tiles_) paths.push_back(t.app.icon);
     icons_.load_now(paths, timeout_ms);
 }
@@ -311,7 +305,7 @@ int Home::row_count() const {
 }
 
 int Home::row_length(int row) const {
-    if (row == kPill) return 2;
+    if (row == kPill) return kPillButtons;
     if (row == 0) return dock_count();
     int first = dock_count() + (row - 1) * kCols;
     return std::clamp(int(tiles_.size()) - first, 0, kCols);
@@ -392,7 +386,7 @@ void Home::move_focus(int row, int col, int dx, int dy, bool scroll) {
 
     for (Tile &t : tiles_) t.focus.target = 0;
     if (row != kPill) tiles_[tile_index(row, col)].focus.target = 1;
-    for (int i = 0; i < 2; i++) pill_focus_[i].target = row == kPill && col == i ? 1 : 0;
+    for (int i = 0; i < kPillButtons; i++) pill_focus_[i].target = row == kPill && col == i ? 1 : 0;
 
     if (!scroll) return;
     // The first grid row rises to y 300; later rows keep the focused row in view.
@@ -484,8 +478,10 @@ void Home::press(SDL_Keycode key) {
 }
 
 void Home::activate() {
-    if (row_ == kPill && col_ == 1) {
+    if (row_ == kPill && col_ == 2) {
         open_settings();
+    } else if (row_ == kPill && col_ == 1) {
+        if (on_launch) on_launch(kControlCenter);
     } else if (row_ == kPill) {
         inputs_menu_.show();
     } else if (on_launch) {
@@ -565,8 +561,11 @@ void Home::pointer_move(float x, float y) {
     if (inputs_menu_.open) return menu_pointer(inputs_menu_, x, y);
     if (moving_) return;
     int row, col;
-    if (grid_.x < 0.5f && (inside(button_rect_[0], x, y) || inside(button_rect_[1], x, y))) {
-        int which = inside(button_rect_[1], x, y) ? 1 : 0;
+    int which = -1;
+    for (int i = 0; i < kPillButtons; i++) {
+        if (inside(button_rect_[i], x, y)) which = i;
+    }
+    if (grid_.x < 0.5f && which >= 0) {
         if (row_ != kPill || col_ != which) move_focus(kPill, which, 0, 0, false);
     } else if (hit_tile(x, y, &row, &col) && (row != row_ || col != col_)) {
         move_focus(row, col, 0, 0, false);
@@ -865,24 +864,25 @@ void Home::render(Painter &p) {
                rgb(0xffffff), 1 - g);
     }
 
-    // Status pill: clock, the Inputs button and the settings button, fading
-    // out in the grid.
+    // Status pill: clock, the Inputs button, the Control Center and the
+    // settings button, fading out in the grid.
     float alpha = 1 - g;
     float pad = 26, gap = 22, height = 64, bh = height - 12;
-    Rect inputs_button{0, 0, inputs_label_.w + 2 * pad, bh}, gear_button{0, 0, bh, bh};
-    float width = pad + clock_.w + gap + inputs_button.w + 6 + gear_button.w + 6;
+    Rect inputs_button{0, 0, inputs_label_.w + 2 * pad, bh}, control_button{0, 0, bh, bh}, gear_button{0, 0, bh, bh};
+    float width = pad + clock_.w + gap + inputs_button.w + 6 + control_button.w + 6 + gear_button.w + 6;
     Rect pill{1920 - kLeft + kDockPad - width, 64, width, height};
     gear_button.x = pill.x + pill.w - gear_button.w - 6;
-    gear_button.y = pill.y + 6;
-    inputs_button.x = gear_button.x - 6 - inputs_button.w;
-    inputs_button.y = pill.y + 6;
+    control_button.x = gear_button.x - 6 - control_button.w;
+    inputs_button.x = control_button.x - 6 - inputs_button.w;
+    gear_button.y = control_button.y = inputs_button.y = pill.y + 6;
     // Darker glass than the dock: the top of a photo is often bright sky or sand.
     p.glass(pill, height / 2, rgb(0x0b1016, 0.38f), alpha);
     p.text(std::round(pill.x + pad), std::round(pill.y + (height - clock_.h) / 2), clock_, rgb(0xffffff), alpha);
 
-    Texture gear = icons_.get(assets_ + "/icons/settings.png");
-    Rect buttons[2] = {inputs_button, gear_button};
-    for (int i = 0; i < 2; i++) {
+    Texture glyphs[kPillButtons] = {{}, icons_.get(assets_ + "/icons/control.png"),
+                                    icons_.get(assets_ + "/icons/settings.png")};
+    Rect buttons[kPillButtons] = {inputs_button, control_button, gear_button};
+    for (int i = 0; i < kPillButtons; i++) {
         button_rect_[i] = buttons[i];
         float pf = std::max(0.f, pill_focus_[i].x);
         Rect b = buttons[i].scaled(1 + 0.08f * pf);
@@ -893,8 +893,8 @@ void Home::render(Painter &p) {
         if (i == 0) {
             p.text(std::round(b.x + (b.w - inputs_label_.w) / 2), std::round(b.y + (b.h - inputs_label_.h) / 2),
                    inputs_label_, ink, alpha);
-        } else if (gear.id) {
-            p.image(b.inset(b.w * 0.2f), 0, gear, ink, alpha);
+        } else if (glyphs[i].id) {
+            p.image(b.inset(b.w * 0.2f), 0, glyphs[i], ink, alpha);
         }
     }
 

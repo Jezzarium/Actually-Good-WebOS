@@ -15,3 +15,6 @@ either pressing keys for you or for a set time while you use the remote:
 tools/record.sh RIGHT RIGHT DOWN 1.5 UP     # a number pauses that many seconds
 tools/record.sh -t 10 -o demo.gif           # 10 s of you driving the remote
 ```
+
+`control-icon.svg` is the source of `assets/icons/control.png`, the pill's Control Center
+glyph: `rsvg-convert -w 192 -h 192 tools/control-icon.svg -o assets/icons/control.png`.

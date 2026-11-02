@@ -1,6 +1,7 @@
 #pragma once
 
-// The home screen: wallpaper, a status pill (clock, Inputs, settings) at the top right,
+// The home screen: wallpaper, a status pill (clock, Inputs, Control Center,
+// settings) at the top right,
 // a glass dock of favourite apps, and the grid of all other apps below it.
 // Moving down into the grid scrolls the page up and blurs the wallpaper.
 //
@@ -13,6 +14,7 @@
 #include "gfx.h"
 #include "icons.h"
 #include "layout.h"
+#include "spring.h"
 #include "wallpaper.h"
 
 #include <SDL.h>
@@ -20,14 +22,6 @@
 #include <functional>
 #include <string>
 #include <vector>
-
-// A damped spring toward target, for every animated value.
-struct Spring {
-    float x = 0, v = 0, target = 0;
-
-    void step(float dt, float stiffness, float damping);
-    void snap(float value) { x = target = value, v = 0; }
-};
 
 class Home {
 public:
@@ -57,10 +51,11 @@ public:
     // Loads every tile's icon before returning, for a complete first frame.
     void load_icons_now(int timeout_ms);
 
-    std::function<void(const std::string &app_id)> on_launch;  // apps and inputs alike
+    std::function<void(const std::string &app_id)> on_launch;  // apps, inputs and the Control Center
 
 private:
-    // Focus rows: kPill is the status pill (column 0 Inputs, 1 settings), 0 the
+    // Focus rows: kPill is the status pill (column 0 Inputs, 1 Control Center,
+    // 2 settings), 0 the
     // dock, 1.. the grid rows.
     static constexpr int kPill = -1;
 
@@ -146,7 +141,8 @@ private:
 
     int row_ = 0, col_ = 0, dock_col_ = 0;
     Spring scroll_, grid_;
-    Spring pill_focus_[2];  // Inputs, settings
+    static constexpr int kPillButtons = 3;
+    Spring pill_focus_[kPillButtons];  // Inputs, Control Center, settings
     float time_ = 0;
 
     // OK (or the pointer button) held down, for long presses.
@@ -156,7 +152,7 @@ private:
     bool pointer_ = false;  // the pointer is in use (until a key is pressed)
     float px_ = 0, py_ = 0;
     bool rehover_ = false;  // re-pick the tile under the pointer once a wheel scroll settles
-    Rect button_rect_[2]{};  // where render() last drew the Inputs and settings buttons
+    Rect button_rect_[kPillButtons]{};  // where render() last drew the pill's buttons
 
     Texture clock_, inputs_label_;
     Texture status_;

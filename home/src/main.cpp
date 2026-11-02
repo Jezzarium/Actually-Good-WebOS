@@ -9,7 +9,7 @@
 #include <SDL.h>
 #include <SDL_image.h>
 #include <SDL_ttf.h>
-#ifdef HOME_WEBOS
+#ifdef LGTV_WEBOS
 #include <SDL_webOS.h>
 #endif
 
@@ -48,7 +48,7 @@ const char *kJailMounts =
     "mkdir -p $D/wallpapers $J$D && chown -R 6067:5000 $D && "  // the jail's prisoner:jailer
     "{ grep -q \" $J$D \" /proc/mounts || { mount --bind $D $J$D && mount --make-rslave $J$D; }; }";
 
-#ifdef HOME_WEBOS
+#ifdef LGTV_WEBOS
 const char *kFont = "/usr/share/fonts/LG_Smart_UI-SemiBold.ttf";
 const Uint32 kWindowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN;
 #else
@@ -60,7 +60,7 @@ const Uint32 kWindowFlags = SDL_WINDOW_OPENGL;
 // tree in a desktop build. HOME_ASSETS overrides both.
 std::string assets_dir() {
     if (const char *env = std::getenv("HOME_ASSETS")) return env;
-#ifdef HOME_WEBOS
+#ifdef LGTV_WEBOS
     char *base = SDL_GetBasePath();  // .../bin/
     std::string dir = std::string(base ? base : "./") + "../assets";
     SDL_free(base);
@@ -218,7 +218,7 @@ int main(int argc, char **argv) {
             if (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) {
                 SDL_Keycode key = e.key.keysym.sym;
                 int scancode = e.key.keysym.scancode;
-#ifdef HOME_WEBOS
+#ifdef LGTV_WEBOS
                 // LG's remote keys have scancodes but no keycode.
                 if (scancode == SDL_WEBOS_SCANCODE_BACK || scancode == SDL_WEBOS_SCANCODE_EXIT) key = SDLK_AC_BACK;
                 if (scancode == SDL_WEBOS_SCANCODE_CURSOR_HIDE) {

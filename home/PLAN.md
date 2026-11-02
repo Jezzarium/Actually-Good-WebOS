@@ -11,9 +11,9 @@ artwork that changes with the focused app.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                                      ┌─────────────────────┐ │
-│                                      │ 9:41  [Inputs]  [⚙] │ │  status pill
-│                                      └─────────────────────┘ │
+│                                  ┌─────────────────────────┐ │
+│                                  │ 9:41  [Inputs] [◐] [⚙]  │ │  status pill
+│                                  └─────────────────────────┘ │
 │                         wallpaper                            │
 │                                                              │
 │ ╭──────────────────────────────────────────────────────────╮ │
@@ -26,7 +26,9 @@ artwork that changes with the focused app.
 - **Wallpaper:** full screen and still, chosen in Home Settings. At night (automatic from 7 PM to
   7 AM, or always) it dims with a cool tint and the dock glass turns smoky.
 - **Status pill:** the clock, an **Inputs** button (a panel of HDMI inputs with their CEC names;
-  choosing one switches to it) and a gear for **Home Settings**. Up from the dock reaches it.
+  choosing one switches to it), a pair of switches for the **Control Center** (the overlay app in
+  `control/`, which drops from under the pill) and a gear for **Home Settings**. Up from the dock
+  reaches it.
 - **Dock:** six favourite apps on frosted glass. Tiles are the app's colour with its icon
   centred; full-square store icons get a tile of their own edge colour so they look full-bleed.
 - **Focus:** the focused tile grows 10% on a spring and lifts with a shadow. A small lean carries
@@ -51,7 +53,7 @@ A native app (`"type": "native"`, `bin/home`) in C++, built like Moonlight: it l
 TV's own LG-built `libSDL2` (webOS port of 2.0.14, Wayland underneath) for the window and remote,
 and `libGLESv2` for drawing. FreeType (through SDL_ttf), SDL_image, json-c and `libluna-service2`
 also come from the TV. Everything on screen is a rounded rectangle drawn by one shader
-(`src/gfx.cpp`), filled with a gradient, a texture, frosted glass, a soft shadow or a highlight.
+(`common/gfx.cpp`, shared with `control/`), filled with a gradient, a texture, frosted glass, a soft shadow or a highlight.
 
 - **Toolchain:** the homebrew webOS cross-compiler, buildroot-nc4
   (`arm-webos-linux-gnueabi_sdk-buildroot`, in `~/webos-toolchain`). The TV's userspace is
@@ -105,9 +107,10 @@ also come from the TV. Everything on screen is a rounded rectangle drawn by one 
 
 ```
 home/
-  src/          C++ sources (main, home screen, drawing, wallpaper, icons, layout, Luna, apps)
+  src/          C++ sources (main, home screen, wallpaper, icons, layout, apps); drawing and Luna
+                are in ../common, shared with the Control Center
   assets/       wallpapers/ (bundled) and icons/ (packaged into the app)
   tv/           appinfo.json and app icons (packaged as-is)
   tools/        key.sh: press remote keys and capture the screen over ssh
-  build.py      cross build with CMake and .ipk packaging (--host for a desktop build)
+  build.py      cross build with CMake and .ipk packaging (../common/native_build.py; --host for a desktop build)
 ```
