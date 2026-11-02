@@ -1,0 +1,18 @@
+{
+  "configs": {
+    "com.webos.applicationManager.keepAliveApps": [
+      "com.webos.app.tvguidejpn",
+      "com.webos.app.voice",
+      "com.webos.app.voiceagent",
+      "com.webos.app.livemenu",
+      "com.webos.app.tvhotkey",
+      "com.webos.app.dvrpopup",
+      "com.webos.app.home",
+      "com.webos.app.seniorhome",
+      "com.webos.app.tnativehome",
+      "airplay",
+      "amazon.alexapr",
+      "yandex.alice"
+    ]
+  }
+}

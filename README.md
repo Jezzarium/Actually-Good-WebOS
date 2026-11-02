@@ -1,6 +1,6 @@
 # lgtv-shell
 
-A faster, cleaner interface for a rooted LG webOS TV: our own settings menu now, our own home screen next.
+A faster, cleaner interface for a rooted LG webOS TV: our own settings menu and our own home screen.
 
 Built and tested on an LG OLED65C5PUA (webOS 10.3.1, Chromium 120 web engine), rooted, with the
 [Homebrew Channel](https://www.webosbrew.org/) and its SSH server.
@@ -9,7 +9,7 @@ Built and tested on an LG OLED65C5PUA (webOS 10.3.1, Chromium 120 web engine), r
 |---|---|
 | [`settings/`](settings) | **Quick Settings**: a replacement for LG's settings panel, opened by the remote's Settings button |
 | [`tv/`](tv) | Scripts that run on the TV (boot hooks, the Settings-button handler) and `revert.sh` to undo everything |
-| `home/` | *Planned:* our own home screen, in the spirit of [Lumen](https://github.com/ammar027/lumen-webos) but written from scratch |
+| [`home/`](home) | **Home**: a tvOS-style home screen and the TV's default Home app, native C++ with SDL2 and OpenGL ES |
 
 ## Quick Settings (`settings/`)
 
@@ -39,6 +39,52 @@ ssh lgtv 'cat > /tmp/qs.ipk && luna-send -n 1 luna://com.webos.appInstallService
   < settings/build/com.lgtvtweaks.settings_*_all.ipk
 ```
 
+## Home screen (`home/`)
+
+A tvOS-style home screen and the TV's default Home app: wallpaper, a glass dock of six favourites,
+all other apps in a grid below, and a status pill with the clock, an **Inputs** button and a
+settings button. Native C++ with SDL2 and OpenGL ES 2, linked against the TV's own libraries: a
+steady 60 fps and about 50 MB of memory. It is on the app manager's keep-alive list, so the Home
+button brings it back in about 50 ms.
+
+- **Remote:** arrows move focus, OK opens. Hold OK (or press Play/Pause) on a tile to **Move** or
+  **Hide** it; while moving, the arrows carry it and OK or Back drops it. Back in the grid returns
+  to the dock.
+- **Magic Remote:** pointing focuses, clicking opens, the wheel scrolls a row at a time.
+- **Home Settings** (the gear in the corner): wallpaper (Left/Right to switch, previewed live),
+  appearance (night dims the wallpaper; automatic from 7 PM to 7 AM, always day, always night), show
+  hidden apps, reset layout.
+- **Inputs:** the panel lists the HDMI inputs with the names devices give over CEC; OK switches.
+- **Wallpapers:** Beach and Big Sur are bundled (`home/assets/wallpapers/`). To add your own, copy
+  JPEGs (ideally 1920x1080) to `/var/lib/lgtv-home/wallpapers/` on the TV and pick them in Home
+  Settings. The layout and settings live in `/var/lib/lgtv-home/layout.json`.
+
+Building needs the homebrew webOS toolchain,
+[buildroot-nc4](https://github.com/openlgtv/buildroot-nc4) (`arm-webos-linux-gnueabi_sdk-buildroot`,
+unpacked to `~/webos-toolchain` and relocated with its `relocate-sdk.sh`), plus `cmake` and `ninja`.
+
+```sh
+cd home
+./build.py            # build/com.lgtvtweaks.home_<version>_all.ipk
+tools/key.sh -c /tmp/cap.png DOWN    # press remote keys over ssh and capture the screen
+```
+
+Install it, then make it the default home and keep it resident:
+
+```sh
+ssh lgtv 'cat > /tmp/home.ipk && luna-send -n 1 luna://com.webos.appInstallService/dev/install \
+  "{\"id\":\"com.lgtvtweaks.home\",\"ipkUrl\":\"/tmp/home.ipk\"}" </dev/null' \
+  < home/build/com.lgtvtweaks.home_*_all.ipk
+ssh lgtv 'luna-send -n 1 luna://com.webos.service.applicationmanager/setDefaultApp \
+  "{\"category\":\"home\",\"appId\":\"com.lgtvtweaks.home\"}" </dev/null'
+```
+
+For keep-alive, add `com.lgtvtweaks.home` to `com.webos.applicationManager.keepAliveApps` with
+`com.webos.service.config/setConfigs` (the original list is in `tv/keepAlive_before.json`).
+
+See [`home/PLAN.md`](home/PLAN.md) for how it works on the TV (the app sandbox, Luna, why not
+Flutter) and what is left to do.
+
 ## TV scripts (`tv/`)
 
 Copied to `/var/lib/webosbrew/init.d/` on the TV, where the Homebrew Channel runs them at boot. Several LG settings only last until the next reboot or wake from standby, so these re-apply them.
@@ -52,7 +98,7 @@ Copied to `/var/lib/webosbrew/init.d/` on the TV, where the Homebrew Channel run
 
 `settingskey.js` and `dns-allow.txt` live in `/var/lib/lgtv-tweaks/` on the TV.
 
-`tv/revert.sh` undoes everything: Settings button, Home and power-on, preloads, the allowlist, own-your-glass, and the privacy settings changed along the way. It uses the saved originals in `tv/*_before.json`.
+`tv/revert.sh` undoes everything: Settings button, Home and power-on, the keep-alive list, preloads, the allowlist, own-your-glass, and the privacy settings changed along the way. It uses the saved originals in `tv/*_before.json`. The apps themselves stay installed; remove them from the TV's app list (and `/var/lib/lgtv-home` for the home screen's layout and wallpapers).
 
 ## Notes for working on the TV
 
@@ -65,6 +111,8 @@ Copied to `/var/lib/webosbrew/init.d/` on the TV, where the Homebrew Channel run
 
 - [Lumen](https://github.com/ammar027/lumen-webos) (MIT): reference for the home screen and for proven Luna calls. No code copied.
 - [own-your-glass](https://github.com/JulioFerrero/own-your-glass) (MIT): installed alongside for privacy hardening.
+- [buildroot-nc4](https://github.com/openlgtv/buildroot-nc4): the webOS cross-compiler the home screen is built with.
+- Wallpapers: Big Sur is Apple's macOS Big Sur wallpaper; Beach is an aerial beach photo.
 
 ## License
 
