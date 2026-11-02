@@ -1,0 +1,17 @@
+{
+  "id": "com.lgtvtweaks.home",
+  "version": "0.0.1",
+  "vendor": "lgtvtweaks",
+  "type": "native",
+  "main": "bin/home",
+  "title": "Home",
+  "appDescription": "A tvOS-style app launcher.",
+  "icon": "icon.png",
+  "largeIcon": "largeIcon.png",
+  "iconColor": "#1c1c22",
+  "bgColor": "#000000",
+  "noSplashOnLaunch": true,
+  "spinnerOnLaunch": false,
+  "handlesRelaunch": true,
+  "disableBackHistoryAPI": true
+}

@@ -9,7 +9,7 @@ Built and tested on an LG OLED65C5PUA (webOS 10.3.1, Chromium 120 web engine), r
 |---|---|
 | [`settings/`](settings) | **Quick Settings**: a replacement for LG's settings panel, opened by the remote's Settings button |
 | [`tv/`](tv) | Scripts that run on the TV (boot hooks, the Settings-button handler) and `revert.sh` to undo everything |
-| `home/` | *Planned:* our own home screen, in the spirit of [Lumen](https://github.com/ammar027/lumen-webos) but written from scratch |
+| [`home/`](home) | *In progress:* a tvOS-style home screen, native C++ with SDL2 and OpenGL ES (see [`home/PLAN.md`](home/PLAN.md)) |
 
 ## Quick Settings (`settings/`)
 
