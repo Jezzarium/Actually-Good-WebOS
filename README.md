@@ -1,6 +1,10 @@
-# lgtv-shell
+# Actually Good WebOS
 
-A faster, cleaner interface for a rooted LG webOS TV: our own settings menu and our own home screen.
+WebOS's default app launcher sucks. I decided to blatantly copy Apple's tvOS home screen and make an actually good app launcher. This also includes an improved settings overlay. It's way faster than WebOS's default menu and actually looks good. 
+
+![The home screen: moving along the dock, then switching the wallpaper in Home Settings](docs/demofinal.gif)
+
+This was entirely written using Claude Code on Opus 5.5. It works on my machine but it probably won't on yours in its current state. Feel free to fork this!
 
 Built and tested on an LG OLED65C5PUA (webOS 10.3.1, Chromium 120 web engine), rooted, with the
 [Homebrew Channel](https://www.webosbrew.org/) and its SSH server.
