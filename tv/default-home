@@ -2,9 +2,12 @@
 # Open the default Home app (settings: general/defaultApps.home) at power-on, and
 # keep LG Home out of RAM while something else is the default.
 # Installed to /var/lib/webosbrew/init.d/ (run at boot by Homebrew Channel).
-# Pairs with general/homeAutoLaunch=off, which stops LG Home opening itself at power-on.
+# Normally bootd opens our home itself at power-on: general/homeAutoLaunch=on makes it
+# launch the system profile's home app, which home-profile.json (in
+# /var/webos-profile/override/) sets to ours. This script is the fallback for when it
+# doesn't, e.g. after a reboot by fault, where bootd opens the last input instead.
 # Switch Home back with setDefaultApp '{"category":"home","appId":"com.webos.app.home"}';
-# this script follows it. Undo: rm this script, kill its process, set homeAutoLaunch on.
+# this script follows it. Installed and removed by tv/install.sh and tv/uninstall.sh.
 
 LG=com.webos.app.home
 PIDFILE=/tmp/default-home.pid

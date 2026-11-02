@@ -15,29 +15,38 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <memory>
 #include <string>
+
+#include <sys/stat.h>
 
 namespace {
 
 const char *kAppId = "com.lgtvtweaks.home";
 const char *kAppManager = "luna://com.webos.applicationManager/";
 const int kScancodePlay = 450;  // LG remote's Play: not in SDL_webOS.h
+// How long the first frame may wait for the jail mounts (after a reboot) and
+// for icons to decode.
+const Uint32 kMountTimeoutMs = 3000;
+const int kIconsTimeoutMs = 1000;
 
 // The app manager runs developer apps chrooted in /var/palm/jail/<id>, where
 // other apps' folders (and so their icons) don't exist, and nothing outside
 // /tmp is writable. The jail's mounts live in the TV's main mount table, so
 // ask the Homebrew Channel's root exec service to bind the app folders in
 // read-only, and kDataDir (owned by the jail user) read-write. Idempotent;
-// gone at reboot.
+// gone at reboot. Each bind is made a slave: other apps' mounts (an overlay
+// per store app) still appear inside it, but unmounting it (tv/uninstall.sh)
+// can't propagate back and unmount the real ones.
 const char *kDataDir = "/var/lib/lgtv-home";
 const char *kJailMounts =
     "J=/var/palm/jail/com.lgtvtweaks.home; D=/var/lib/lgtv-home; "
     "for d in /media/cryptofs/apps/usr/palm/applications /mnt/otncabi/usr/palm/applications "
     "/usr/palm/applications; do "
     "mkdir -p $J$d && { grep -q \" $J$d \" /proc/mounts || "
-    "{ mount --bind $d $J$d && mount -o remount,bind,ro $J$d; }; }; done; "
+    "{ mount --bind $d $J$d && mount -o remount,bind,ro $J$d && mount --make-rslave $J$d; }; }; done; "
     "mkdir -p $D/wallpapers $J$D && chown -R 6067:5000 $D && "  // the jail's prisoner:jailer
-    "{ grep -q \" $J$D \" /proc/mounts || mount --bind $D $J$D; }";
+    "{ grep -q \" $J$D \" /proc/mounts || { mount --bind $D $J$D && mount --make-rslave $J$D; }; }";
 
 #ifdef HOME_WEBOS
 const char *kFont = "/usr/share/fonts/LG_Smart_UI-SemiBold.ttf";
@@ -107,40 +116,71 @@ int main(int argc, char **argv) {
     if (!painter.init(w, h) || !home.init(w, h, font, assets_dir())) return 1;
     LOG("home: ready in %.0f ms", double(SDL_GetPerformanceCounter() - t0) * 1000 / freq);
 
+    // Everything is in place before the first frame, so the screen appears
+    // finished: the saved layout and wallpaper, the app list from the last run
+    // and every icon. The live list replaces it once the app manager answers.
     Luna luna;
+    std::vector<App> shown;
     if (luna.connect(kAppId)) {
-        auto show = [&home](json_object *reply) {
+        const std::string data = kDataDir;
+        // The jail mounts last until reboot, so usually the last run made
+        // them; the folder's contents only show through the mount.
+        struct stat st;
+        // After a reboot, wait for them (briefly) so the layout can be read.
+        auto mounts = std::make_shared<int>(0);  // 0 waiting, 1 done, 2 gave up waiting
+        if (stat((data + "/wallpapers").c_str(), &st) == 0) {
+            *mounts = 1;
+        } else {
+            json_object *exec = json_object_new_object();
+            json_object_object_add(exec, "command", json_object_new_string(kJailMounts));
+            luna.call("luna://org.webosbrew.hbchannel.service/exec", json_object_to_json_string(exec),
+                      [mounts, &home, data](json_object *reply) {
+                          if (!get_bool(reply, "returnValue")) {
+                              LOG("home: jail mounts: %s", json_object_to_json_string(reply));
+                          }
+                          if (*mounts == 2) home.set_layout_path(data + "/layout.json");
+                          *mounts = 1;
+                      });
+            json_object_put(exec);
+            for (Uint32 start = SDL_GetTicks(); !*mounts && SDL_GetTicks() - start < kMountTimeoutMs;) {
+                luna.pump();
+                SDL_Delay(5);
+            }
+            if (!*mounts) *mounts = 2;
+        }
+        // Until they're done, a default layout with nothing saved.
+        home.set_layout_path(*mounts == 1 ? data + "/layout.json" : "");
+        shown = load_apps(data + "/apps.json");
+        home.set_apps(shown);
+        home.set_status("Loading apps\u2026");  // first run only: no saved list yet
+        home.load_icons_now(kIconsTimeoutMs);
+
+        auto show = [&home, &shown, data](json_object *reply) {
+            json_object *list;
+            if (!json_object_object_get_ex(reply, "launchPoints", &list)) {
+                LOG("home: listLaunchPoints: %s", json_object_to_json_string(reply));
+                home.set_status("Couldn't get the app list: " + get_string(reply, "errorText", "no answer"));
+                return;
+            }
             std::vector<App> apps = apps_from_launch_points(reply, kAppId);
             LOG("home: %zu apps", apps.size());
-            if (!apps.empty()) home.set_apps(apps);
+            home.set_status("No apps found");
+            if (apps == shown) return;
+            shown = apps;
+            save_apps(data + "/apps.json", apps);
+            home.set_apps(apps);
         };
         // The first reply has the list; later ones describe one change, so
         // fetch the whole list again rather than patching it.
-        auto list_apps = [&luna, show] {
-            luna.subscribe(std::string(kAppManager) + "listLaunchPoints", R"({"subscribe":true})",
-                           [&luna, show](json_object *reply) {
-                               json_object *list;
-                               if (json_object_object_get_ex(reply, "launchPoints", &list)) {
-                                   show(reply);
-                               } else if (json_object_object_get_ex(reply, "change", &list)) {
-                                   luna.call(std::string(kAppManager) + "listLaunchPoints", "{}", show);
-                               } else {
-                                   LOG("home: listLaunchPoints: %s", json_object_to_json_string(reply));
-                               }
-                           });
-        };
-        // Icons are read as soon as the list arrives, so mount first.
-        json_object *exec = json_object_new_object();
-        json_object_object_add(exec, "command", json_object_new_string(kJailMounts));
-        luna.call("luna://org.webosbrew.hbchannel.service/exec", json_object_to_json_string(exec),
-                  [list_apps, &home](json_object *reply) {
-                      if (!get_bool(reply, "returnValue")) {
-                          LOG("home: jail mounts: %s", json_object_to_json_string(reply));
-                      }
-                      home.set_layout_path(std::string(kDataDir) + "/layout.json");
-                      list_apps();
-                  });
-        json_object_put(exec);
+        luna.subscribe(std::string(kAppManager) + "listLaunchPoints", R"({"subscribe":true})",
+                       [&luna, show](json_object *reply) {
+                           json_object *change;
+                           if (json_object_object_get_ex(reply, "change", &change)) {
+                               luna.call(std::string(kAppManager) + "listLaunchPoints", "{}", show);
+                           } else {
+                               show(reply);
+                           }
+                       });
 
         luna.subscribe("luna://com.webos.service.eim/getAllInputStatus", R"({"subscribe":true})",
                        [&home](json_object *reply) {
@@ -160,13 +200,17 @@ int main(int argc, char **argv) {
             json_object_put(params);
         };
     } else {
-        LOG("home: no Luna bus, showing placeholder apps");
+        LOG("home: no Luna bus");
         home.set_layout_path("/tmp/lgtv-home-layout.json");
+        home.set_status("No apps: can't reach the TV's app manager");
+        home.load_icons_now(kIconsTimeoutMs);
     }
+    LOG("home: first frame ready at %.0f ms", double(SDL_GetPerformanceCounter() - t0) * 1000 / freq);
 
     Uint64 last = SDL_GetPerformanceCounter(), stats_start = last;
     int frames = 0;
     double worst = 0;
+    bool first_frame = true;
     for (bool running = true; running;) {
         luna.pump();
         for (SDL_Event e; SDL_PollEvent(&e);) {
@@ -220,6 +264,11 @@ int main(int argc, char **argv) {
         glClear(GL_COLOR_BUFFER_BIT);
         home.render(painter);
         SDL_GL_SwapWindow(window);
+        if (first_frame) {
+            // The TV takes a while to show a new window; the first swap waits for it.
+            LOG("home: first frame shown at %.0f ms", double(SDL_GetPerformanceCounter() - t0) * 1000 / freq);
+            first_frame = false;
+        }
     }
 
     SDL_GL_DeleteContext(gl);

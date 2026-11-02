@@ -84,8 +84,12 @@ also come from the TV. Everything on screen is a rounded rectangle drawn by one 
   60 Hz; 120 Hz only applies to 120 Hz video and game input. The home screen holds 60 fps, with
   the worst frame around 20 ms.
 - **Memory:** about 50 MB resident (wallpaper and its blurred copy, icons, fonts).
-- **Start:** ready in about 300 ms; the first frame then waits about 1.8 s for the TV to show a
-  new window, which keep-alive avoids after the first launch.
+- **Start:** the first frame is ready about 300 ms after the window opens, already complete:
+  the saved layout and wallpaper, the app list from the last run (`/var/lib/lgtv-home/apps.json`)
+  and every icon are loaded before it is drawn, and the live list from the app manager replaces it
+  only if something changed. The TV then takes about 1 to 2 s to show a new window. Keep-alive
+  avoids all of this while the TV is on, but the TV closes every app when it is switched off, so
+  each power-on is a cold start.
 
 ## Not done yet
 
@@ -93,7 +97,7 @@ also come from the TV. Everything on screen is a rounded rectangle drawn by one 
   corners (YouTube AdFree) still show a faint box.
 - **Sunrise and sunset** for automatic appearance, instead of fixed hours.
 - **Desktop build:** `./build.py --host` compiles with the system SDL2, but needs `sdl2_ttf` and
-  `sdl2_image`, and has no fake TV services (it shows placeholder apps and inputs).
+  `sdl2_image`, and has no TV services: the dock says it can't reach the app manager.
 - **Input status:** the TV reports every HDMI port as connected, so the panel's dots don't yet
   show which ports have a signal.
 

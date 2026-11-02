@@ -112,11 +112,8 @@ bool Home::init(int w, int h, const char *font_path, const std::string &assets) 
         row.label = render_text(pill_font_, name);
         settings_.rows.push_back(row);
     }
-    load_wallpaper_image();
-    night_.snap(night_now() ? 1 : 0);
     refresh_clock();
-    set_apps(placeholder_apps());
-    set_inputs(placeholder_inputs());
+    set_inputs({});
     return true;
 }
 
@@ -238,8 +235,14 @@ void Home::set_layout_path(const std::string &path) {
     layout_path_ = path;
     if (!layout_.load(path)) layout_ = {};
     load_wallpaper_image();
-    night_.target = night_now() ? 1 : 0;
+    night_.snap(night_now() ? 1 : 0);
     rebuild_tiles();
+}
+
+void Home::load_icons_now(int timeout_ms) {
+    std::vector<std::string> paths{assets_ + "/icons/settings.png"};
+    for (const Tile &t : tiles_) paths.push_back(t.app.icon);
+    icons_.load_now(paths, timeout_ms);
 }
 
 void Home::save_layout() {
@@ -347,9 +350,19 @@ void Home::set_inputs(const std::vector<Input> &inputs) {
         row.dot_color = input.connected ? 0x30d158 : 0x8e8e93;
         inputs_menu_.rows.push_back(row);
     }
+    if (inputs.empty()) {
+        // Says so rather than opening nothing; choosing it does nothing.
+        Menu::Row row;
+        row.label = render_text(pill_font_, "No inputs found");
+        inputs_menu_.rows.push_back(row);
+    }
     int n = int(inputs_menu_.rows.size());
-    inputs_menu_.focus = std::clamp(inputs_menu_.focus, 0, std::max(0, n - 1));
-    if (n == 0) inputs_menu_.hide();
+    inputs_menu_.focus = std::clamp(inputs_menu_.focus, 0, n - 1);
+}
+
+void Home::set_status(const std::string &message) {
+    destroy(status_);
+    if (!message.empty()) status_ = render_text(pill_font_, message);
 }
 
 // --- Focus and keys --------------------------------------------------------
@@ -474,7 +487,7 @@ void Home::activate() {
     if (row_ == kPill && col_ == 1) {
         open_settings();
     } else if (row_ == kPill) {
-        if (!inputs_menu_.rows.empty()) inputs_menu_.show();
+        inputs_menu_.show();
     } else if (on_launch) {
         on_launch(tiles_[tile_index(row_, col_)].app.id);
     }
@@ -650,9 +663,11 @@ void Home::menu_pointer(Menu &m, float x, float y) {
 void Home::draw_menu(Painter &p, Menu &m, float x, float y, float width, float alpha) {
     float a = std::clamp(m.anim.x, 0.f, 1.f) * alpha;
     if (a < 0.01f) return;
-    // Drops in a little as it opens.
+    // Drops in a little as it opens, on whole pixels: text inside is rounded to
+    // pixels too, and a sub-pixel offset while the spring settles made it flicker
+    // between two rows.
     float header = m.title.id ? kMenuTitleH : 0;
-    Rect panel{x, y - 18 * (1 - a), width, header + 2 * kMenuPad + m.rows.size() * kMenuRowH};
+    Rect panel{x, std::round(y - 18 * (1 - a)), width, header + 2 * kMenuPad + m.rows.size() * kMenuRowH};
     m.rect = panel;
     p.shadow(panel, kMenuRadius, 40, rgb(0x000000, 0.45f), a);
     p.glass(panel, kMenuRadius, rgb(0x0b1016, 0.45f), a);
@@ -844,6 +859,11 @@ void Home::render(Painter &p) {
         if (i != focused) draw_tile(p, i);
     }
     if (focused >= 0) draw_tile(p, focused);
+    // No apps: why, in the middle of the dock.
+    if (tiles_.empty() && status_.id) {
+        p.text(std::round(dock.x + (dock.w - status_.w) / 2), std::round(dock.y + (dock.h - status_.h) / 2), status_,
+               rgb(0xffffff), 1 - g);
+    }
 
     // Status pill: clock, the Inputs button and the settings button, fading
     // out in the grid.

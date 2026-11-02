@@ -1,7 +1,7 @@
 #pragma once
 
 // The apps on the home screen, from applicationManager/listLaunchPoints, in
-// the order LG Home keeps them. Desktop builds use a placeholder list.
+// the order LG Home keeps them.
 
 #include <json-c/json.h>
 
@@ -20,7 +20,11 @@ struct App {
 // behind the Inputs button) and this app itself.
 std::vector<App> apps_from_launch_points(json_object *reply, const std::string &self_id);
 
-std::vector<App> placeholder_apps();
+// The last list LG gave, kept on disk so the next start can draw the real
+// home screen in its first frame, before the app manager answers.
+std::vector<App> load_apps(const std::string &path);
+void save_apps(const std::string &path, const std::vector<App> &apps);
+bool operator==(const App &a, const App &b);
 
 // An external input (HDMI), from com.webos.service.eim/getAllInputStatus.
 struct Input {
@@ -31,4 +35,3 @@ struct Input {
 };
 
 std::vector<Input> inputs_from_status(json_object *reply);
-std::vector<Input> placeholder_inputs();
