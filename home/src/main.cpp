@@ -150,12 +150,20 @@ int main(int argc, char **argv) {
         home.set_layout_path(*mounts == 1 ? data + "/layout.json" : "");
         shown = load_apps(data + "/apps.json");
         home.set_apps(shown);
+        home.set_status("Loading apps\u2026");  // first run only: no saved list yet
         home.load_icons_now(kIconsTimeoutMs);
 
         auto show = [&home, &shown, data](json_object *reply) {
+            json_object *list;
+            if (!json_object_object_get_ex(reply, "launchPoints", &list)) {
+                LOG("home: listLaunchPoints: %s", json_object_to_json_string(reply));
+                home.set_status("Couldn't get the app list: " + get_string(reply, "errorText", "no answer"));
+                return;
+            }
             std::vector<App> apps = apps_from_launch_points(reply, kAppId);
             LOG("home: %zu apps", apps.size());
-            if (apps.empty() || apps == shown) return;
+            home.set_status("No apps found");
+            if (apps == shown) return;
             shown = apps;
             save_apps(data + "/apps.json", apps);
             home.set_apps(apps);
@@ -164,13 +172,11 @@ int main(int argc, char **argv) {
         // fetch the whole list again rather than patching it.
         luna.subscribe(std::string(kAppManager) + "listLaunchPoints", R"({"subscribe":true})",
                        [&luna, show](json_object *reply) {
-                           json_object *list;
-                           if (json_object_object_get_ex(reply, "launchPoints", &list)) {
-                               show(reply);
-                           } else if (json_object_object_get_ex(reply, "change", &list)) {
+                           json_object *change;
+                           if (json_object_object_get_ex(reply, "change", &change)) {
                                luna.call(std::string(kAppManager) + "listLaunchPoints", "{}", show);
                            } else {
-                               LOG("home: listLaunchPoints: %s", json_object_to_json_string(reply));
+                               show(reply);
                            }
                        });
 
@@ -192,10 +198,9 @@ int main(int argc, char **argv) {
             json_object_put(params);
         };
     } else {
-        LOG("home: no Luna bus, showing placeholder apps");
+        LOG("home: no Luna bus");
         home.set_layout_path("/tmp/lgtv-home-layout.json");
-        home.set_apps(placeholder_apps());
-        home.set_inputs(placeholder_inputs());
+        home.set_status("No apps: can't reach the TV's app manager");
         home.load_icons_now(kIconsTimeoutMs);
     }
     LOG("home: first frame ready at %.0f ms", double(SDL_GetPerformanceCounter() - t0) * 1000 / freq);

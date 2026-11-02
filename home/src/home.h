@@ -49,6 +49,8 @@ public:
     // All of LG's launch points; the layout decides order and what is hidden.
     void set_apps(const std::vector<App> &apps);
     void set_inputs(const std::vector<Input> &inputs);
+    // Shown in the empty dock while there are no apps: why (empty: nothing).
+    void set_status(const std::string &message);
     // Where the layout is saved (empty: nowhere yet); loads it and its
     // wallpaper. Call before the first frame.
     void set_layout_path(const std::string &path);
@@ -157,6 +159,7 @@ private:
     Rect button_rect_[2]{};  // where render() last drew the Inputs and settings buttons
 
     Texture clock_, inputs_label_;
+    Texture status_;
     int clock_minute_ = -1;
 
     std::vector<Input> inputs_;

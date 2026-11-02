@@ -113,6 +113,7 @@ bool Home::init(int w, int h, const char *font_path, const std::string &assets) 
         settings_.rows.push_back(row);
     }
     refresh_clock();
+    set_inputs({});
     return true;
 }
 
@@ -349,9 +350,19 @@ void Home::set_inputs(const std::vector<Input> &inputs) {
         row.dot_color = input.connected ? 0x30d158 : 0x8e8e93;
         inputs_menu_.rows.push_back(row);
     }
+    if (inputs.empty()) {
+        // Says so rather than opening nothing; choosing it does nothing.
+        Menu::Row row;
+        row.label = render_text(pill_font_, "No inputs found");
+        inputs_menu_.rows.push_back(row);
+    }
     int n = int(inputs_menu_.rows.size());
-    inputs_menu_.focus = std::clamp(inputs_menu_.focus, 0, std::max(0, n - 1));
-    if (n == 0) inputs_menu_.hide();
+    inputs_menu_.focus = std::clamp(inputs_menu_.focus, 0, n - 1);
+}
+
+void Home::set_status(const std::string &message) {
+    destroy(status_);
+    if (!message.empty()) status_ = render_text(pill_font_, message);
 }
 
 // --- Focus and keys --------------------------------------------------------
@@ -476,7 +487,7 @@ void Home::activate() {
     if (row_ == kPill && col_ == 1) {
         open_settings();
     } else if (row_ == kPill) {
-        if (!inputs_menu_.rows.empty()) inputs_menu_.show();
+        inputs_menu_.show();
     } else if (on_launch) {
         on_launch(tiles_[tile_index(row_, col_)].app.id);
     }
@@ -846,6 +857,11 @@ void Home::render(Painter &p) {
         if (i != focused) draw_tile(p, i);
     }
     if (focused >= 0) draw_tile(p, focused);
+    // No apps: why, in the middle of the dock.
+    if (tiles_.empty() && status_.id) {
+        p.text(std::round(dock.x + (dock.w - status_.w) / 2), std::round(dock.y + (dock.h - status_.h) / 2), status_,
+               rgb(0xffffff), 1 - g);
+    }
 
     // Status pill: clock, the Inputs button and the settings button, fading
     // out in the grid.

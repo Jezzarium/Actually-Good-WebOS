@@ -97,7 +97,7 @@ also come from the TV. Everything on screen is a rounded rectangle drawn by one 
   corners (YouTube AdFree) still show a faint box.
 - **Sunrise and sunset** for automatic appearance, instead of fixed hours.
 - **Desktop build:** `./build.py --host` compiles with the system SDL2, but needs `sdl2_ttf` and
-  `sdl2_image`, and has no fake TV services (it shows placeholder apps and inputs).
+  `sdl2_image`, and has no TV services: the dock says it can't reach the app manager.
 - **Input status:** the TV reports every HDMI port as connected, so the panel's dots don't yet
   show which ports have a signal.
 
