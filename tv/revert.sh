@@ -13,6 +13,8 @@ luna-send -n 1 luna://com.webos.service.config/setConfigs '$ORIG' </dev/null >/d
 ssh lgtv 'rm -f /var/lib/webosbrew/init.d/default-home; [ -f /tmp/default-home.pid ] && kill $(cat /tmp/default-home.pid) 2>/dev/null
 luna-send -n 1 luna://com.webos.service.applicationmanager/setDefaultApp "{\"category\":\"home\",\"appId\":\"com.webos.app.home\"}" </dev/null >/dev/null 2>&1
 luna-send -n 1 luna://com.webos.settingsservice/setSystemSettings "{\"category\":\"general\",\"settings\":{\"homeAutoLaunch\":\"on\"}}" </dev/null >/dev/null 2>&1
+rm -f /var/webos-profile/override/lgtvtweaks_profile.json
+luna-send -n 1 luna://com.webos.service.systemprofile/debug/rescan "{}" </dev/null >/dev/null 2>&1
 luna-send -n 1 luna://com.webos.service.preloadmanager/setPreloadPolicy "{\"application\":{\"id\":\"com.webos.app.home\",\"isEnabled\":true}}" </dev/null >/dev/null 2>&1
 echo home restored'
 

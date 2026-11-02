@@ -86,6 +86,18 @@ ssh lgtv 'luna-send -n 1 luna://com.webos.service.applicationmanager/setDefaultA
 For keep-alive, add `com.lgtvtweaks.home` to `com.webos.applicationManager.keepAliveApps` with
 `com.webos.service.config/setConfigs` (the original list is in `tv/keepAlive_before.json`).
 
+To have the TV open it at power-on, with no LG Home or last input first: with
+`general/homeAutoLaunch` on, bootd launches the *system profile's* home app (not the Home
+button's default), which is `com.webos.app.home` from the factory. `tv/home-profile.json`
+overrides it in the profile service's override folder, and persists across reboots:
+
+```sh
+ssh lgtv 'cat > /var/webos-profile/override/lgtvtweaks_profile.json && \
+  luna-send -n 1 luna://com.webos.service.systemprofile/debug/rescan "{}" </dev/null && \
+  luna-send -n 1 luna://com.webos.settingsservice/setSystemSettings \
+  "{\"category\":\"general\",\"settings\":{\"homeAutoLaunch\":\"on\"}}" </dev/null' < tv/home-profile.json
+```
+
 See [`home/PLAN.md`](home/PLAN.md) for how it works on the TV (the app sandbox, Luna, why not
 Flutter) and what is left to do.
 
@@ -96,7 +108,7 @@ Copied to `/var/lib/webosbrew/init.d/` on the TV, where the Homebrew Channel run
 | Script | What it does |
 |---|---|
 | `settings-key` + `settingskey.js` | Adds a key handler to surface-manager (`com.webos.surfacemanager.keyFilters`) so the Settings button opens Quick Settings, and preloads the app hidden. No system files are patched. |
-| `default-home` | Opens the default Home app at power-on and keeps LG's home out of memory while something else is the default. |
+| `default-home` | Opens the default Home app at power-on if the TV didn't (see below) and keeps LG's home out of memory while something else is the default. |
 | `trim-preloads` | Stops LG's preload manager keeping unused apps (browser, voice, Prime Video, Netflix, Live TV, LG Channels) in memory, at boot and after every wake. |
 
 `settingskey.js` lives in `/var/lib/lgtv-tweaks/` on the TV.
