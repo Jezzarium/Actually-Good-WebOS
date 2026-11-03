@@ -42,26 +42,38 @@ and changing the offsets and bytes in `overlay.cpp`.
 - **Hiding:** `needFocus` false gives the remote back at once; after the fade-out the window
   draws one empty frame and moves off screen (`windowPosX` 1920), so it costs the compositor
   nothing. Showing moves it back and takes the remote; that is the whole cost of opening.
-- **SAM closes it** whenever another app is launched (Home included), even one on the
-  keep-alive list, as long as its window has ever been drawn: a drawn overlay stays in
-  `getForegroundAppInfo` (`extraInfo`), which the hidden web panel didn't. Minimizing closes
-  it at once; unmapping the surface doesn't help (the compositor shows it again a second later).
-- **So `tv/settings-key` reloads it** with `{"hidden": true}` a few seconds after every
-  foreground change, if it isn't running. A hidden start draws one empty frame off screen, so
-  the surface is already mapped when it is next opened. The compositor gives a new overlay the
-  remote even when `needFocus` is "false" (any string reads as true at creation) and only lets go
-  on a change, so on that first focus the app sets it to "true" and back to "false" (about 30 ms).
+- **App switches:** when another app comes to the front (Home included), surface-manager
+  closes the overlay on screen (`views.starfishOverlay.close` in
+  `StarfishViewStateController.qml`), and a drawn overlay counts as on screen even off it and
+  unfocused. An overlay with the window property `keepWindowOnAppSwitch` "true" is left to
+  handle that itself (`StarfishOverlaySurface.qml`, `StarfishViewContainer.qml`), so the app
+  sets it and stays loaded. It is still closed at power-off. As the panel would otherwise stay
+  open over the new app (and the compositor then draws it only every second or so), it
+  closes at once when the foreground app changes: `tv/settings-key` writes the foreground app's
+  id to `/tmp/lgtv-control.foreground`, and the open panel watches it.
+  (Minimizing closes it at once; unmapping the surface, or swapping it for a new undrawn window,
+  doesn't take it out of the overlay view without breaking the relaunch.)
+- **`tv/settings-key` reloads it** with `{"hidden": true}` after a foreground change if it isn't
+  running (it was closed some other way, or crashed). A hidden start draws one empty frame off
+  screen, so the surface is already mapped when it is next opened. The compositor gives a new
+  overlay the remote even when `needFocus` is "false" (any string reads as true at creation)
+  and only lets go on a change, so on that first focus the app sets it to "true" and back to
+  "false" (about 30 ms).
 - **Toggling:** the Settings key and Home's button both just launch the app; a relaunch opens it,
-  or closes it if it is open. The reload touches `/tmp/lgtv-control.preload` first, and a
+  or closes it if it is open. A reload touches `/tmp/lgtv-control.preload` first, and a
   relaunch within 3 s of that is ignored, so a reload reaching a copy still running can't open it.
 
 ## Glass
 
-An overlay can't read what is drawn below it, so the panel's glass shows Home's wallpaper:
-Home saves its blurred copy to `/tmp/lgtv-home-backdrop.bmp` (both apps' jails share the TV's
-`/tmp`) whenever it loads one, and the panel reloads it on opening if it changed. Over Home it
-matches Home's own menus; over video it is still the wallpaper. Until Home has run since the TV
-started, the panel is plain smoked glass.
+An overlay can't read what is drawn below it, so the panel only shows glass over Home:
+Home saves its blurred wallpaper to `/tmp/lgtv-home-backdrop.bmp` (both apps' jails share the
+TV's `/tmp`) whenever it loads one, and the panel reloads it on opening if it changed, so it
+matches Home's own menus. Over any other app it is one solid dark colour; the panel tells by
+the foreground app's id in `/tmp/lgtv-control.foreground` (above). Until Home has saved a
+wallpaper, it is dark over Home too.
+
+(LG's `com.webos.service.capture/executeOneShot` can capture the video and UI planes, which
+would allow a real blur, but only as root and in ~0.2 s, too slow to do before every opening.)
 
 ## Measured
 

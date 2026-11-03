@@ -27,7 +27,9 @@ public:
     bool init(const std::string &font_dir, const std::string &icons_dir, Tv *tv, Bluetooth *bt);
 
     void open();   // the first page, Brightness focused, values read again
-    void close();  // fades out; on_closed once it has
+    void close(bool fade = true);  // fades out; on_closed once it has
+    // Whether another app has come to the front since it opened.
+    bool app_switched();
     bool is_open() const { return open_; }
     bool faded_out() const { return !open_ && anim_.x < 0.01f; }
 
@@ -118,5 +120,8 @@ private:
     Texture toast_;
     Texture backdrop_;  // Home's blurred wallpaper; none until Home has run
     time_t backdrop_time_ = 0;
+    bool over_home_ = false;  // Home's wallpaper glass; dark glass over any other app
+    std::string opened_over_;  // the foreground app when it opened
+    long long foreground_written_ = 0;
     float toast_time_ = 0;
 };

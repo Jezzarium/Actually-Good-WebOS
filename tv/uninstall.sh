@@ -49,7 +49,9 @@ for s in settings-key default-home trim-preloads; do
     rm -f /var/lib/webosbrew/init.d/\$s
     [ -f /tmp/\$s.pid ] && killtree \$(cat /tmp/\$s.pid) 2>/dev/null
     rm -f /tmp/\$s.pid
-done; true"
+done
+# What settings-key wrote for the Control Center.
+rm -f /tmp/lgtv-control.foreground /tmp/lgtv-control.preload; true"
 
 step "Settings key back to LG"
 # The handler goes out of surface-manager's list before its file is deleted.

@@ -3,10 +3,11 @@
 // center button.
 //
 // It stays loaded and hides by moving its window off screen and giving the
-// remote back, so opening it again is instant. SAM closes it whenever another
-// app is launched, so tv/settings-key reloads it hidden after each app switch
-// ({"hidden": true}): it then draws one transparent frame off screen, so its
-// surface is already mapped when it is next opened.
+// remote back, so opening it again is instant. It asks to stay loaded when
+// another app comes to the front (keepWindowOnAppSwitch); should it be closed
+// anyway, tv/settings-key reloads it hidden ({"hidden": true}): it then draws
+// one transparent frame off screen, so its surface is already mapped when it
+// is next opened.
 
 #include "bluetooth.h"
 #include "gfx.h"
@@ -87,6 +88,9 @@ int main(int argc, char **argv) {
     bool resident = overlay && relaunch;
     if (!resident) LOG("control: not this SDL build's layout; running as a plain window");
     if (start_hidden && !resident) return 0;
+    // An overlay is closed when another app comes to the front, unless it asks
+    // to stay: then surface-manager leaves it to the app (StarfishOverlaySurface.qml).
+    if (resident) overlay::set_property(window, "keepWindowOnAppSwitch", "true");
     if (start_hidden) overlay::set_property(window, "windowPosX", "1920");
 
     SDL_GLContext gl = SDL_GL_CreateContext(window);
@@ -128,10 +132,10 @@ int main(int argc, char **argv) {
         state = State::kShown;
     };
     // The remote goes back to the app at once; the window leaves once faded out.
-    auto hide = [&]() {
+    auto hide = [&](bool fade = true) {
         if (state != State::kShown) return;
         if (resident) overlay::set_property(window, "needFocus", "false");
-        panel.close();
+        panel.close(fade);
         state = State::kHiding;
     };
     panel.on_close = hide;
@@ -184,6 +188,10 @@ int main(int argc, char **argv) {
             else if (state == State::kShown) hide();
             else show();
         }
+        // Another app came to the front (the Home key, an input...). The panel
+        // outlives the switch, but not over the new app: it goes at once, as
+        // the compositor no longer draws it promptly.
+        if (state == State::kShown && panel.app_switched()) hide(false);
         tv.update();
         bt.update();
 

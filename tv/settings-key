@@ -3,10 +3,12 @@
 # by inserting /var/lib/lgtv-tweaks/settingskey.js into surface-manager's key
 # filter list, just before LG's handleHotkeys. configd keeps setConfigs changes
 # only until reboot, so this re-applies it at boot.
-# It also keeps the Control Center loaded, hidden: SAM closes it whenever an app
-# is launched, so after every foreground change it is reloaded with
-# {"hidden": true} if it isn't running, and the next Settings press only has to
-# show it.
+# It also keeps the Control Center loaded, hidden: the app asks to survive app
+# switches, but should it be closed anyway, after a foreground change it is
+# reloaded with {"hidden": true} if it isn't running, so the next Settings
+# press only has to show it. And it writes the foreground app's id to
+# /tmp/lgtv-control.foreground, so the panel knows whether it is over Home and
+# closes when the app changes.
 # Installed to /var/lib/webosbrew/init.d/. Undo: rm this script and reboot, or
 # setConfigs with the saved original list (tv/keyFilters_before.json in the repo).
 
@@ -17,6 +19,7 @@ PIDFILE=/tmp/settings-key.pid
 # The app ignores a relaunch that comes this soon after the marker (one that
 # reaches a copy still running), so a reload can never open it.
 MARKER=/tmp/lgtv-control.preload
+FOREGROUND=/tmp/lgtv-control.foreground
 
 [ -f "$HANDLER" ] || exit 0
 [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null && exit 0
@@ -45,6 +48,18 @@ preload() {
 }
 
 (
+    # The app in front (overlays not counted), for the Control Center: it
+    # matches Home's wallpaper over Home and is plain dark glass over the rest,
+    # and it closes when this changes.
+    while :; do
+        luna-send -i luna://com.webos.applicationManager/getForegroundAppInfo '{"subscribe":true}' \
+            </dev/null 2>/dev/null |
+        while read -r line; do
+            id=$(printf '%s' "$line" | sed -n 's/.*"appId":"\([^"]*\)".*/\1/p')
+            [ -n "$id" ] && echo "$id" > "$FOREGROUND.tmp" && mv "$FOREGROUND.tmp" "$FOREGROUND"
+        done
+        sleep 5
+    done &
     # configd may not be up yet; retry for ~2 minutes.
     for i in $(seq 1 24); do
         insert_handler && break
@@ -59,7 +74,7 @@ preload() {
             </dev/null 2>/dev/null |
         while read -r line; do
             case "$line" in *'"appId"'*) ;; *) continue ;; esac
-            # SAM closes the Control Center a moment after another app opens.
+            # Give a Control Center being closed by the switch time to go.
             sleep 3
             preload
         done

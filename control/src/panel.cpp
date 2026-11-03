@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 
 #include <sys/stat.h>
 
@@ -59,9 +60,27 @@ const Section *section(const std::string &title) {
 
 const char *kLgSettings = "com.palm.app.settings";
 
-// Home's blurred wallpaper (home/src/home.cpp saves it), behind the glass. An
-// overlay can't see what's below it, so over video it is the wallpaper still.
+// Home's blurred wallpaper (home/src/home.cpp saves it), behind the glass over
+// Home. An overlay can't see what's below it, so over other apps the glass is
+// a plain dark colour instead.
 const char *kBackdrop = "/tmp/lgtv-home-backdrop.bmp";
+const char *kHome = "com.lgtvtweaks.home";
+// The foreground app's id: tv/settings-key writes it on every change.
+const char *kForeground = "/tmp/lgtv-control.foreground";
+
+std::string foreground_app() {
+    std::ifstream f(kForeground);
+    std::string id;
+    std::getline(f, id);
+    return id;
+}
+
+// When the file was last written; zero if it isn't there.
+long long foreground_written() {
+    struct stat st;
+    if (stat(kForeground, &st) != 0) return 0;
+    return st.st_mtim.tv_sec * 1000000000LL + st.st_mtim.tv_nsec;
+}
 
 bool inside(Rect r, float x, float y) { return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h; }
 
@@ -445,7 +464,10 @@ void Panel::load_backdrop() {
 }
 
 void Panel::open() {
-    load_backdrop();
+    foreground_written_ = foreground_written();
+    opened_over_ = foreground_app();
+    over_home_ = opened_over_ == kHome;
+    if (over_home_) load_backdrop();
     while (stack_.size() > 1) stack_.pop_back();
     bt_->set_active(false);
     Page &main = *stack_.back();
@@ -462,9 +484,18 @@ void Panel::open() {
     slide_.snap(1);
 }
 
-void Panel::close() {
+bool Panel::app_switched() {
+    if (!open_) return false;
+    long long written = foreground_written();
+    if (written == foreground_written_) return false;
+    foreground_written_ = written;
+    return foreground_app() != opened_over_;
+}
+
+void Panel::close(bool fade) {
     open_ = false;
     anim_.target = 0;
+    if (!fade) anim_.snap(0);
     if (bt_->searching()) bt_->search(false);
     bt_->set_active(false);
 }
@@ -793,13 +824,14 @@ void Panel::render(Painter &p) {
 
     // The same glass as Home's menus.
     p.shadow(pr, kPanelRadius, 40, rgb(0x000000, 0.45f), a);
-    if (backdrop_.id) {
+    if (over_home_ && backdrop_.id) {
         p.set_backdrop(backdrop_);
         p.glass(pr, kPanelRadius, rgb(0x0b1016, 0.45f), a);
     } else {
-        // Home hasn't run since the TV started: a rim of light around dark smoked glass.
+        // Over other apps (or Home before it saved its wallpaper): one solid
+        // dark colour inside a faint rim of light, whatever is behind.
         p.fill(pr, kPanelRadius, rgb(0xffffff, 0.16f), rgb(0xffffff, 0.06f), a);
-        p.fill(pr.inset(1.5f), kPanelRadius - 1.5f, rgb(0x1b2029, 0.90f), rgb(0x0f1217, 0.92f), a);
+        p.fill(pr.inset(1.5f), kPanelRadius - 1.5f, rgb(0x15191f), rgb(0x15191f), a);
     }
 
     float s = std::clamp(slide_.x, 0.f, 1.f);
