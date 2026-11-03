@@ -49,8 +49,8 @@ A compact glass panel in the top-right corner, in the home screen's design (it d
 Home's status pill ends), drawn over whatever is playing.
 
 - **Brightness first:** it opens with Brightness focused (LG's "OLED Pixel Brightness", the `backlight` key), so Left/Right changes it immediately.
-- **Quick settings:** picture mode, eye comfort, sound mode, sound output, sleep timer, energy saving; then Screen off, More and All settings.
-- **More settings:** grouped pages for Picture, Sound, OLED care & power, General and Accessibility, each with **Open in LG settings** where LG has a page for it.
+- **Quick settings:** picture mode, eye comfort, sound mode, sound output, sleep timer, energy saving; then Screen off and More.
+- **More settings:** grouped pages for Picture, Sound, OLED care & power, General and Accessibility, each with **Open in LG settings** where LG has a page for it, and **Open LG settings** for the full LG settings app. General has a Remote pointer switch to turn off the Magic Remote cursor.
 - **Bluetooth:** Sound out has a **Bluetooth devices** page: paired headphones and speakers (OK connects and sends the sound there, OK again disconnects, Play forgets one) and **Search for devices** to pair new ones.
 - **Remote:** the Settings button opens and closes it; so does the middle button of Home's pill. Back goes up a page, or closes it.
 - **Fast:** it stays loaded and hides by moving its window off screen, so it shows about 0.1–0.25 s after the press, against about 0.4 s for the web version, and holds 60 fps (the web version ran near 48 fps with 200 ms hitches). See [`control/README.md`](control/README.md) for how it gets an overlay window from LG's SDL, and what that costs.

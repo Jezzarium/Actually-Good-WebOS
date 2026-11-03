@@ -143,6 +143,7 @@ std::vector<Item> make_items() {
         {"sleepTimer", "timer", "", "Sleep timer", "moon", Kind::kChoice, minutes_fn, {}, kSleepOptions},
         {"quickStartMode", "option", "", "Quick Start+", "", Kind::kToggle, nullptr, {}, {}},
         {"screenSaverTimer", "option", "", "Screen saver after", "", Kind::kChoice, minutes_fn, {}, {}},
+        {"remotePointer", "general", "", "Remote pointer", "", Kind::kToggle, nullptr, {}, {}},
         {"standByLight", "option", "", "Standby light", "", Kind::kToggle, nullptr, {}, {}},
 
         {"highContrast", "option", "", "High contrast", "", Kind::kToggle, nullptr, {}, {}},
@@ -404,6 +405,9 @@ void Tv::load(const std::vector<std::string> &ids) {
                         s.hidden = !get_bool(ui, "visible", true);
                         s.disabled = !get_bool(ui, "active", true);
                     }
+                    // LG offers the pointer switch only in Easy Mode, so its
+                    // platform profile hides and disables it; the key works anyway.
+                    if (id == "remotePointer") s.hidden = s.disabled = false;
                     if (json_object_object_get_ex(d, "values", &values)) {
                         if (json_object_object_get_ex(values, "range", &range)) {
                             json_object *v;

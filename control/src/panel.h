@@ -3,7 +3,7 @@
 // The Control Center panel: a compact glass sheet in the top-right corner, in
 // the home screen's design (it drops from where Home's status pill is).
 //
-// The first page has Brightness, a grid of quick settings and three actions;
+// The first page has Brightness, a grid of quick settings and two actions;
 // the others are lists (choices, More settings, its sections, Bluetooth) with
 // Home's sliding highlight. Pages slide within the same panel, which springs
 // to each page's height.

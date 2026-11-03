@@ -45,7 +45,7 @@ const std::vector<Section> &sections() {
         {"Sound", {"soundMode", "soundOutput", "autoVolume"}, "sound"},
         {"OLED care & power", {"energySaving", "screenShift", "logoLuminanceAdjust", "quickStartMode", "standByLight"},
          nullptr},
-        {"General", {"sleepTimer", "screenSaverTimer"}, nullptr},
+        {"General", {"sleepTimer", "screenSaverTimer", "remotePointer"}, nullptr},
         {"Accessibility", {"highContrast", "greyscale", "menuTransparency", "audioGuidance"}, nullptr},
     };
     return all;
@@ -64,6 +64,11 @@ const char *kLgSettings = "com.palm.app.settings";
 const char *kBackdrop = "/tmp/lgtv-home-backdrop.bmp";
 
 bool inside(Rect r, float x, float y) { return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h; }
+
+// Runs a cell's action from a copy. An action can rebuild its page (a picker
+// rebuilds when its value changes), which destroys the cell's own copy and
+// what it captured while it is still running.
+void run(std::function<void()> action) { action(); }
 
 Color mix(Color a, Color b, float t) {
     return {a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t};
@@ -192,10 +197,8 @@ void Panel::build(Page &page) {
             {"screenOff", "Screen off", "power",
              [this]() { tv_->screen_off([this](bool ok) { if (ok && on_close) on_close(); }); }},
             {"more", "More", "more", [this]() { push(Page::kMore, "More settings"); }},
-            {"lg", "All settings", "gear",
-             [this]() { tv_->launch(kLgSettings, "", [this](bool ok) { if (ok && on_close) on_close(); }); }},
         };
-        float button_w = (kInner - 2 * kGap) / 3;
+        float button_w = (kInner - (actions.size() - 1) * kGap) / actions.size();
         std::vector<int> row;
         for (size_t i = 0; i < actions.size(); i++) {
             Cell b;
@@ -258,6 +261,9 @@ void Panel::build(Page &page) {
                 row(action_row("section:" + title, title, "", [this, title]() { push(Page::kSection, title, title); },
                                true));
             }
+            row(action_row("lg", "Open LG settings", "gear", [this]() {
+                tv_->launch(kLgSettings, "", [this](bool ok) { if (ok && on_close) on_close(); });
+            }, true));
         } else if (page.kind == Page::kSection) {
             const Section *s = section(page.arg);
             for (const std::string &id : s ? s->ids : std::vector<std::string>{}) {
@@ -550,12 +556,12 @@ void Panel::key_down(SDL_Keycode key, bool repeat) {
         int dir = key == SDLK_RIGHT ? 1 : -1;
         if (cell && cell->type == Type::kSlider) adjust(*cell, dir);
         else if (page.list && dir < 0 && !repeat) pop();
-        else if (page.list && cell && cell->chevron && !repeat) cell->activate();
+        else if (page.list && cell && cell->chevron && !repeat) run(cell->activate);
         else move_focus(0, dir);
         break;
     }
     case SDLK_RETURN:
-        if (!repeat && cell && cell->activate && !cell->disabled) cell->activate();
+        if (!repeat && cell && cell->activate && !cell->disabled) run(cell->activate);
         break;
     case SDLK_ESCAPE:
     case SDLK_AC_BACK:
@@ -635,7 +641,7 @@ void Panel::pointer_click() {
         float fraction = std::clamp((px_ - cr.x) / cr.w, 0.f, 1.f);
         if (!s.disabled && !s.value.empty()) tv_->set_number(cell->id, std::round(s.min + fraction * (s.max - s.min)));
     } else if (cell->activate && !cell->disabled) {
-        cell->activate();
+        run(cell->activate);
     }
 }
 
