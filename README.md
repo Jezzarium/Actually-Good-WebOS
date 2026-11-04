@@ -173,10 +173,7 @@ a soft start, a fast middle and a long, gentle settle, with a hint of bounce as 
 
 ## Notes for working on the TV
 
-- `luna-send` prints nothing over SSH unless stdin is redirected: `luna-send -n 1 <uri> '<json>' </dev/null`.
-- `/usr` and `/etc` are read-only. Changes go in `/var`, through LG's config service (`com.webos.service.config/setConfigs`), or as bind mounts.
-- LG's settings schema is `/etc/palm/description.json` (about 1,950 settings with types, allowed values and dimensions).
-- `ls-monitor` on the TV records live Luna traffic, useful for seeing exactly what LG's own menus call.
+See [docs/working-on-the-tv.md](docs/working-on-the-tv.md): Luna over SSH, where changes can go, logs, crash dumps, screenshots, what input can't be simulated, and commands to avoid.
 
 ## Credits
 
