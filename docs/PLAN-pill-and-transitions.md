@@ -371,6 +371,11 @@ Where it differs from the above (the README's "App transitions" describes what i
 - **Lifetime:** the layer keeps a guarded reference to the key filter's loader object and stops
   when surface-manager drops it (any change to the list, or uninstall). Calling `destroy()` from
   that moment never completes, so it stays, empty, until the next load replaces it or a reboot.
+- **Snapshots are of LG's app view** (`views.fullscreen`), not of a surface item. Holding Home's
+  surface in a ShaderEffectSource while LG took it off screen and put it back (Home pressed during
+  the opening zoom) left it never drawn again: Home black, at 200 fps, until it restarted. The view
+  never leaves the scene. The app snapshot's ShaderEffectSource is a visible pixel just off screen:
+  at opacity 0 it is only drawn when something shows it, by which time LG has switched to Home.
 - **Video:** `foregroundVideoWindowMgr.getForegroundVideoWindow()` on the fullscreen container
   lists the app while it plays video (tested with YouTube).
 - **Debugging:** surface-manager's console doesn't reach any log. A throwaway key filter that

@@ -173,7 +173,7 @@ Item {
         if (released) return;
         var item = views.fullscreen.currentItem;
         if (!item || !tile || item.appId !== tile.id || playingVideo(item)) return;
-        snapshot.sourceItem = item;
+        snapshot.sourceItem = views.fullscreen;
         snapshot.scheduleUpdate();  // drawn into its texture with the next frame
         snapped = Date.now();
         snappedApp = item.appId;
@@ -202,7 +202,7 @@ Item {
         reset();
         if (!onScreen(tile)) return;
         opening = appId;
-        homeShot.sourceItem = home;
+        homeShot.sourceItem = views.fullscreen;
         homeShot.scheduleUpdate();
         homeShot.visible = true;
         closing = false;
@@ -264,10 +264,20 @@ Item {
         redraws.target = null;
         card.visible = false;
         homeShot.visible = false;
-        homeShot.sourceItem = null;
         useSnapshot = false;
-        // Let the app's surface go, unless a snapshot is waiting for Home.
-        if (!snapped) snapshot.sourceItem = null;
+        letGo.restart();
+    }
+
+    // Lets go of LG's app view once the snapshots are no longer shown, a few
+    // frames later.
+    Timer {
+        id: letGo
+        interval: 300
+        onTriggered: {
+            if (!homeShot.visible) homeShot.sourceItem = null;
+            // Unless a snapshot is waiting for Home.
+            if (!root.snapped && !card.visible) snapshot.sourceItem = null;
+        }
     }
 
     // The springs run on their own clock: elapsed goes up steadily, t follows
@@ -340,6 +350,12 @@ Item {
         onTriggered: root.reset()
     }
 
+    // Both snapshots are of LG's app view (views.fullscreen), not of the
+    // app's or Home's surface: a surface that LG takes off screen and puts
+    // back while a ShaderEffectSource holds it is never drawn again (Home
+    // came back black, until it restarted, when Home was pressed mid-zoom).
+    // The view itself never leaves the screen.
+
     // Home as it was when the tile was chosen: LG takes Home away as soon as
     // the app's window opens, and the tile grows over this instead.
     // Home's window has alpha where it blends; LG composes it over black.
@@ -355,13 +371,14 @@ Item {
         live: false
     }
 
-    // The app's picture. It isn't shown (the card draws it), but it must stay
-    // visible, at no opacity, for its texture to be drawn.
+    // The app's picture, drawn by the card. It must be on screen to be taken
+    // when asked (at no opacity it waits until something shows it, by then
+    // Home), so it is a pixel just off screen; the texture is full size.
     ShaderEffectSource {
         id: snapshot
-        width: root.width
-        height: root.height
-        opacity: 0
+        x: -1
+        width: 1
+        height: 1
         live: false
         mipmap: true
     }
