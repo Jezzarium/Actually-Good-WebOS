@@ -199,6 +199,9 @@ int main(int argc, char **argv) {
         home.on_tile = [window](const std::string &json) {
             if (!lg_sdl::set_property(window, "lgtvLaunch", json.c_str())) LOG("home: can't set window properties");
         };
+        home.on_tile_back = [window](const std::string &count) {
+            lg_sdl::set_property(window, "lgtvTileBack", count.c_str());
+        };
     } else {
         LOG("home: no Luna bus");
         home.set_layout_path("/tmp/lgtv-home-layout.json");

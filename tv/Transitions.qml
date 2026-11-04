@@ -60,12 +60,13 @@ Item {
     // fixed easing curve reads as mechanical. As on iOS, where the card is
     // and how big it is have springs of their own, so it travels on a curve:
     // closing, it shrinks first and then swoops down into its tile (landing
-    // with a hint of bounce); opening, it rises first and then fills the
-    // screen. Responses are short, for snap.
+    // with a hint of bounce); opening, it grows out of its tile first
+    // (covering it while Home takes it away) and then fills the screen.
+    // Responses are short, for snap.
     readonly property real openMoveDamping: 0.9
-    readonly property real openMoveResponse: 0.3
+    readonly property real openMoveResponse: 0.4
     readonly property real openGrowDamping: 0.86
-    readonly property real openGrowResponse: 0.4
+    readonly property real openGrowResponse: 0.3
     readonly property real closeMoveDamping: 0.8
     readonly property real closeMoveResponse: 0.42
     readonly property real closeGrowDamping: 0.86
@@ -126,7 +127,10 @@ Item {
         target: root.home
         enabled: !root.released
         ignoreUnknownSignals: true
-        onWindowPropertiesChanged: root.readTile(true)
+        onWindowPropertiesChanged: {
+            root.readTile(true);
+            root.tileBack();
+        }
     }
     // The opening app's next frame: it has drawn.
     Connections {
@@ -142,6 +146,17 @@ Item {
         home = item;
         launches = -1;
         readTile(false);
+        tileBackSeen = item.windowProperties ? item.windowProperties.lgtvTileBack : undefined;
+    }
+
+    // Home draws the tile again (lgtvTileBack changed): the card on it goes
+    // in the same frame, so the two never show together.
+    property var tileBackSeen
+    function tileBack() {
+        var value = home && home.windowProperties ? home.windowProperties.lgtvTileBack : undefined;
+        if (value === tileBackSeen) return;
+        tileBackSeen = value;
+        if (closing && card.visible) reset();
     }
 
     function readTile(launch) {
@@ -214,8 +229,9 @@ Item {
         reset();
         if (!onScreen(tile)) return;
         opening = appId;
-        // Live until the app's window opens: Home leaves the tile out a frame
-        // or so after it says where it is, and the picture must not have it.
+        // Live until the app's window opens: Home leaves the tile out as it
+        // says where it is, but the compositor shows that a few frames later,
+        // and the picture must not have it.
         homeShot.sourceItem = views.fullscreen;
         homeShot.live = true;
         homeShot.visible = true;
@@ -271,6 +287,7 @@ Item {
         fade.stop();
         shrink.stop();
         appear.stop();
+        landWait.stop();
         land.stop();
         openTimeout.stop();
         watchdog.stop();
@@ -297,18 +314,41 @@ Item {
 
     // The springs run on their own clock: elapsed goes up steadily, t follows
     // the curve.
+    readonly property real openSettle: Math.max(settleTime(openMoveDamping, openMoveResponse),
+                                                settleTime(openGrowDamping, openGrowResponse))
+    readonly property real closeSettle: Math.max(settleTime(closeMoveDamping, closeMoveResponse),
+                                                 settleTime(closeGrowDamping, closeGrowResponse))
+    // A clock drives elapsed, but elapsed goes on at most a frame and a bit
+    // per frame drawn: when LG holds the compositor up switching apps (up to
+    // 200 ms, just as the zoom starts), the card waits instead of jumping.
+    property real clock: 0
+    property real lastClock: 0
+    onClockChanged: {
+        var dt = clock - lastClock;
+        lastClock = clock;
+        if (dt <= 0) return;
+        var settle = closing ? closeSettle : openSettle;
+        elapsed = Math.min(settle, elapsed + Math.min(dt, 0.025));
+        if (elapsed < settle) return;
+        if (expand.running) {
+            expand.stop();
+            expanded = true;
+            homeShot.visible = false;
+            if (drawn) reveal();
+        } else if (shrink.running) {
+            shrink.stop();
+            // Home draws the tile again soon and says so (tileBack()); the
+            // card goes in that frame. Without word from it, it fades.
+            landWait.start();
+        }
+    }
     NumberAnimation {
         id: expand
         target: root
-        property: "elapsed"
+        property: "clock"
         from: 0
-        to: Math.max(settleTime(openMoveDamping, openMoveResponse), settleTime(openGrowDamping, openGrowResponse))
-        duration: to * 1000
-        onFinished: {
-            root.expanded = true;
-            homeShot.visible = false;
-            if (root.drawn) root.reveal();
-        }
+        to: 60
+        duration: 60000
     }
     NumberAnimation {
         id: fade
@@ -322,11 +362,15 @@ Item {
     NumberAnimation {
         id: shrink
         target: root
-        property: "elapsed"
+        property: "clock"
         from: 0
-        to: Math.max(settleTime(closeMoveDamping, closeMoveResponse), settleTime(closeGrowDamping, closeGrowResponse))
-        duration: to * 1000
-        onFinished: land.start()
+        to: 60
+        duration: 60000
+    }
+    Timer {
+        id: landWait
+        interval: 400
+        onTriggered: land.start()
     }
     NumberAnimation {
         id: appear

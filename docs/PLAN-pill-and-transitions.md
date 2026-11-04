@@ -358,10 +358,17 @@ Where it differs from the above (the README's "App transitions" describes what i
 - **Springs, not easing curves.** Size (with corner radius and icon size) and position each follow
   a spring (damping ratio and response, as in Apple's "Designing Fluid Interfaces"), so the card travels on a curve; responses 0.3–0.42 s, settling in about half a second. See the top of
   `Transitions.qml`. Closing lands with a slight bounce. Opacity fades stay short eases.
-- **Home leaves the tile out** while the card is drawn over it, so there aren't two: on a launch,
-  for one frame before it publishes `lgtvLaunch` (so the snapshot of Home under the zoom doesn't
-  have it) and launches, and for 0.5 s when it gets the remote back (`SDL_WINDOWEVENT_FOCUS_GAINED`)
-  with the foreground file still naming that app, until the shrinking card is on the tile.
+- **Home leaves the tile out** while the card is drawn over it, so there aren't two. On a launch
+  it publishes `lgtvLaunch` and stops drawing the tile at once, but launches 8 frames later: the
+  compositor shows Home's frames several frames late, and a running app (YouTube) is in front
+  50 ms after the launch. The picture of Home under the zoom stays live until the app's window
+  opens, and the card grows faster than it moves, so it covers the tile meanwhile. Going Home,
+  it leaves the tile out for 0.7 s after it gets the remote back
+  (`SDL_WINDOWEVENT_FOCUS_GAINED`) with the foreground file still naming that app, then draws it
+  and sets `lgtvTileBack`; the card, waiting on the tile, goes in that same frame (or fades after
+  0.4 s without word).
+- **Frame-paced springs:** a clock drives the springs but they advance at most 25 ms per frame
+  drawn, so LG's 50–200 ms stalls while switching apps pause the motion instead of skipping it.
 - **Home behind the zoom is a snapshot.** LG hides Home as soon as the app's window opens, often
   within 100 ms, so the tile grew over black; Home is captured as the tile is chosen and drawn
   under it until it fills the screen.

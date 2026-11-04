@@ -66,6 +66,9 @@ public:
     // it on the way Home. Sent before the launch, and again whenever the tile
     // moves. main.cpp sets it as a property of Home's window.
     std::function<void(const std::string &json)> on_tile;
+    // Home has drawn that tile again after leaving it out for the
+    // transition: the card drawn over it can go. A new value each time.
+    std::function<void(const std::string &count)> on_tile_back;
 
 private:
     // Focus rows: kPill is the status pill (column 0 Inputs, 1 Control Center,
@@ -197,6 +200,9 @@ private:
     uint64_t tile_hidden_until_ = 0;
     int frames_ = 0;          // drawn so far
     int launch_frame_ = -1;   // the launch waits for this frame: the first without the tile
+    bool tile_left_out_ = false;  // in the frame being drawn
+    bool tile_back_ = false;      // the last frame drew it again: say so
+    int tile_backs_ = 0;
 
     Menu tile_menu_;  // Move, Hide
     Menu settings_;

@@ -66,8 +66,9 @@ constexpr uint64_t kLeavingTime = 3000;
 // How long the launched app's tile is left out while tv/Transitions.qml draws
 // it: the zoom to full screen (Home is then hidden; the time is for a launch
 // that goes nowhere), and the shrink back, until the card is on the tile.
-// The card fades once it lands, over the tile drawn again by then.
-constexpr uint64_t kTileOpening = 5000, kTileClosing = 500;
+// The compositor drops the card in the frame Home says the tile is back.
+constexpr uint64_t kTileOpening = 5000, kTileClosing = 700;
+constexpr int kLaunchDelayFrames = 8;
 
 // Wallpapers: bundled in assets/wallpapers, plus any the user copies here.
 const char *kUserWallpapers = "/var/lib/lgtv-home/wallpapers";
@@ -477,13 +478,16 @@ void Home::activate() {
     } else if (row_ == kPill) {
         request(col_ == Pill::kControl ? shell::kOpenPanel : shell::kOpenInputs);
     } else if (!tiles_.empty()) {
-        // The tile goes from Home first, so the compositor's picture of Home
-        // under the zoom doesn't have it twice: one frame without it, then
-        // where it was (update()), then the launch.
+        // Where the tile is goes out now: the zoom starts over it. The tile
+        // leaves Home, and the launch waits until the compositor shows Home
+        // without it (it shows Home's frames several frames late, and a
+        // running app such as YouTube is in front 50 ms after the launch): it
+        // keeps its picture of Home under the zoom up to date until then.
         launched_ = tiles_[tile_index(row_, col_)].app.id;
         launches_++;
         hide_tile(kTileOpening);
-        launch_frame_ = frames_ + 1;
+        publish_tile();
+        launch_frame_ = frames_ + kLaunchDelayFrames;
     }
 }
 
@@ -781,6 +785,13 @@ void Home::publish() {
 
 void Home::update(float dt) {
     time_ += dt;
+    // The frame just drawn has the tile again (after the swap: the compositor
+    // sees that frame before this).
+    if (tile_back_ && on_tile_back) on_tile_back(std::to_string(++tile_backs_));
+    tile_back_ = false;
+    bool left_out = !launched_.empty() && shell::now_ms() < tile_hidden_until_;
+    if (tile_left_out_ && !left_out) tile_back_ = true;
+    tile_left_out_ = left_out;
     icons_.upload_ready();
 
     if (holding_ && !held_long_) {
@@ -838,7 +849,6 @@ void Home::update(float dt) {
     publish();
     if (launch_frame_ >= 0 && frames_ >= launch_frame_) {
         launch_frame_ = -1;
-        publish_tile();
         launch_app(launched_);
     }
     publish_tile();
@@ -852,11 +862,12 @@ void Home::focus_gained() {
     if (!launched_.empty() && foreground_id_ == launched_) hide_tile(kTileClosing);
 }
 
-void Home::hide_tile(uint64_t ms) { tile_hidden_until_ = shell::now_ms() + ms; }
-
-bool Home::tile_hidden(int index) const {
-    return tiles_[index].app.id == launched_ && shell::now_ms() < tile_hidden_until_;
+void Home::hide_tile(uint64_t ms) {
+    tile_hidden_until_ = shell::now_ms() + ms;
+    tile_left_out_ = true;  // from the next frame, not the next update
 }
+
+bool Home::tile_hidden(int index) const { return tile_left_out_ && tiles_[index].app.id == launched_; }
 
 void Home::tile_colors(const Tile &t, Color *top, Color *bottom) const {
     uint32_t color = t.app.color;
@@ -896,8 +907,7 @@ std::string Home::tile_json(int index) {
 }
 
 void Home::publish_tile() {
-    // A launch waiting for its frame without the tile: not yet.
-    if (launched_.empty() || !on_tile || launch_frame_ >= 0) return;
+    if (launched_.empty() || !on_tile) return;
     std::string json;
     for (int i = 0; i < int(tiles_.size()); i++) {
         if (tiles_[i].app.id == launched_) json = tile_json(i);
