@@ -169,6 +169,8 @@ Item {
             return;
         }
         front = item.appId;
+        // Still Home: LG draws the app from the next frame.
+        homeShot.live = false;
         if (item.appId === opening) {
             redraws.target = item.surface;
             drawWait.restart();
@@ -212,8 +214,10 @@ Item {
         reset();
         if (!onScreen(tile)) return;
         opening = appId;
+        // Live until the app's window opens: Home leaves the tile out a frame
+        // or so after it says where it is, and the picture must not have it.
         homeShot.sourceItem = views.fullscreen;
-        homeShot.scheduleUpdate();
+        homeShot.live = true;
         homeShot.visible = true;
         closing = false;
         elapsed = 0;
@@ -274,6 +278,7 @@ Item {
         redraws.target = null;
         card.visible = false;
         homeShot.visible = false;
+        homeShot.live = false;
         useSnapshot = false;
         letGo.restart();
     }
@@ -400,6 +405,41 @@ Item {
         mipmap: true
         sourceSize.height: 320
         source: root.tile && root.tile.icon ? "file://" + root.tile.icon : ""
+    }
+
+    // The focused tile's shadow, as Home draws it (common/gfx.cpp), under the
+    // card while it is small: there as the card lands, as Home draws its own.
+    ShaderEffect {
+        id: shadow
+        readonly property real blur: 30
+        visible: card.visible && strength > 0.001
+        opacity: card.opacity
+        x: card.x - blur
+        y: card.y + 16 * (root.tile ? root.tile.shadow : 0) - blur
+        width: card.width + 2 * blur
+        height: card.height + 2 * blur
+
+        property size shapeSize: Qt.size(card.width, card.height)
+        // Home keeps the unfocused tile's radius for the shadow.
+        property real radius: root.tile ? root.tile.r / (1 + 0.1 * root.tile.shadow) : 0
+        property real spread: blur
+        property real strength: root.tile && root.tile.shadow ? 0.55 * root.tile.shadow * Math.max(0, 1 - root.t) : 0
+
+        fragmentShader: "
+            varying highp vec2 qt_TexCoord0;
+            uniform lowp float qt_Opacity;
+            uniform highp vec2 shapeSize;
+            uniform highp float radius;
+            uniform highp float spread;
+            uniform lowp float strength;
+
+            void main() {
+                highp vec2 p = qt_TexCoord0 * (shapeSize + vec2(2.0 * spread)) - vec2(spread) - shapeSize * 0.5;
+                highp vec2 q = abs(p) - shapeSize * 0.5 + vec2(radius);
+                highp float d = min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - radius;
+                lowp float a = 1.0 - smoothstep(-spread, spread, d);
+                gl_FragColor = vec4(0.0, 0.0, 0.0, a * a * strength) * qt_Opacity;
+            }"
     }
 
     // The tile (its colours and icon, rounded), or the app's picture, at any

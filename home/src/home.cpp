@@ -888,10 +888,10 @@ std::string Home::tile_json(int index) {
     char json[512];
     std::snprintf(json, sizeof json,
                   R"({"n":%d,"id":"%s","x":%.1f,"y":%.1f,"w":%.1f,"h":%.1f,"r":%.1f,"top":"%s","bottom":"%s",)"
-                  R"("icon":"%s","iw":%.1f,"ih":%.1f,"ir":%.1f,"sx":%.2f,"sy":%.2f,"shine":%.2f})",
+                  R"("icon":"%s","iw":%.1f,"ih":%.1f,"ir":%.1f,"sx":%.2f,"sy":%.2f,"shine":%.2f,"shadow":%.2f})",
                   launches_, t.app.id.c_str(), s.x, s.y, s.w, s.h, kRadius * k, hex(top).c_str(),
                   hex(bottom).c_str(), icon.id ? t.app.icon.c_str() : "", iw, ih, kIconRadius * k, kShineX, kShineY,
-                  kShineStrength * t.focus.target);
+                  kShineStrength * t.focus.target, t.focus.target);
     return json;
 }
 
