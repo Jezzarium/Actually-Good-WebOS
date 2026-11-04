@@ -39,6 +39,7 @@ constexpr float kLeanPixels = 7;
 // Where the shine rests once the tile is still (0..1 of the tile), and how far
 // a full lean moves it.
 constexpr float kShineX = 0.5f, kShineY = -0.05f, kShineTravel = 0.55f;
+constexpr float kShineStrength = 0.24f;  // on the focused tile
 
 // Holding OK this long opens the tile menu.
 constexpr float kLongPress = 0.6f;
@@ -860,9 +861,10 @@ std::string Home::tile_json(int index) {
     char json[512];
     std::snprintf(json, sizeof json,
                   R"({"n":%d,"id":"%s","x":%.1f,"y":%.1f,"w":%.1f,"h":%.1f,"r":%.1f,"top":"%s","bottom":"%s",)"
-                  R"("icon":"%s","iw":%.1f,"ih":%.1f,"ir":%.1f})",
+                  R"("icon":"%s","iw":%.1f,"ih":%.1f,"ir":%.1f,"sx":%.2f,"sy":%.2f,"shine":%.2f})",
                   launches_, t.app.id.c_str(), s.x, s.y, s.w, s.h, kRadius * k, hex(top).c_str(),
-                  hex(bottom).c_str(), icon.id ? t.app.icon.c_str() : "", iw, ih, kIconRadius * k);
+                  hex(bottom).c_str(), icon.id ? t.app.icon.c_str() : "", iw, ih, kIconRadius * k, kShineX, kShineY,
+                  kShineStrength * t.focus.target);
     return json;
 }
 
@@ -915,7 +917,7 @@ void Home::draw_tile(Painter &p, int index) {
         p.image(name, 0, tile.name, rgb(0xffffff));
     }
     // Over the icon too, so the whole tile catches the light like a sheet of glass.
-    p.shine(s, radius, sx, sy, 0.24f * f);
+    p.shine(s, radius, sx, sy, kShineStrength * f);
     p.set_rotation(0);
 
     if (row >= 1) {

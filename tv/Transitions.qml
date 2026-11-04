@@ -421,6 +421,11 @@ Item {
                                   ? Qt.point(width / height * root.height / root.width, 1)
                                   : Qt.point(1, height / width * root.width / root.height)
         // The picture until the last stretch, then the tile.
+        // The focused tile's highlight, as Home draws it: there as the card
+        // lands, so nothing changes when the card goes.
+        property vector3d shine: root.tile && root.tile.shine
+                                 ? Qt.vector3d(root.tile.sx, root.tile.sy, root.tile.shine * Math.max(0, 1 - root.t))
+                                 : Qt.vector3d(0, 0, 0)
         property real snapMix: root.useSnapshot ? Math.max(0, Math.min(1, (root.t - 0.01) / 0.15)) : 0
 
         Behavior on iconShown { NumberAnimation { duration: 150 } }
@@ -439,6 +444,7 @@ Item {
             uniform sampler2D snapTexture;
             uniform highp vec2 snapScale;
             uniform lowp float snapMix;
+            uniform highp vec3 shine;
 
             // Signed distance from p to a rounded rectangle centred on 0.
             highp float box(highp vec2 p, highp vec2 halfSize, highp float r) {
@@ -456,6 +462,10 @@ Item {
                     lowp vec4 i = texture2D(iconTexture, ip) * a * iconShown;
                     c = i + c * (1.0 - i.a);
                 }
+                // common/gfx.cpp's shine, over tile and icon alike.
+                highp vec2 sp = (qt_TexCoord0 - shine.xy) * vec2(1.0, cardSize.y / cardSize.x * 1.6);
+                lowp float glow = exp(-dot(sp, sp) * 4.0) * shine.z;
+                c = vec4(mix(c.rgb, vec3(1.0), glow), c.a);
                 if (snapMix > 0.0) {
                     // Apps are opaque; where video punched through, black.
                     lowp vec4 s = vec4(texture2D(snapTexture, 0.5 + (qt_TexCoord0 - 0.5) * snapScale).rgb, 1.0);
