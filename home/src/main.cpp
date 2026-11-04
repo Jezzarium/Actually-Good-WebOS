@@ -3,6 +3,7 @@
 
 #include "gfx.h"
 #include "home.h"
+#include "lg_sdl.h"
 #include "log.h"
 #include "luna.h"
 
@@ -194,6 +195,9 @@ int main(int argc, char **argv) {
                           }
                       });
             json_object_put(params);
+        };
+        home.on_tile = [window](const std::string &json) {
+            if (!lg_sdl::set_property(window, "lgtvLaunch", json.c_str())) LOG("home: can't set window properties");
         };
     } else {
         LOG("home: no Luna bus");

@@ -81,6 +81,10 @@ step "boot scripts"
 scripts="settings-key default-home"
 [ -n "$trim" ] && scripts="$scripts trim-preloads"
 tv 'mkdir -p /var/lib/webosbrew/init.d /var/lib/lgtv-tweaks && cat > /var/lib/lgtv-tweaks/settingskey.js' < tv/settingskey.js
+# The app transitions, loaded into surface-manager by settings-key.
+for f in transitions.js Transitions.qml; do
+    tv "cat > /var/lib/lgtv-tweaks/$f" < "tv/$f"
+done
 for s in $scripts; do
     tv "cat > /var/lib/webosbrew/init.d/$s && chmod 755 /var/lib/webosbrew/init.d/$s" < "tv/$s"
 done

@@ -27,19 +27,31 @@ FOREGROUND=/tmp/lgtv-control.foreground
 [ -f "$HANDLER" ] || exit 0
 [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null && exit 0
 
+# Also puts tv/transitions.js (the app transitions) at the front of the list,
+# if installed: it must see Home and Back before LG's handlers act on them.
+TRANSITIONS=/var/lib/lgtv-tweaks/transitions.js
+
 insert_handler() {
     cur=$(luna-send -n 1 luna://com.webos.service.config/getConfigs \
         "{\"configNames\":[\"$NAME\"]}" </dev/null 2>/dev/null)
-    case "$cur" in
-        *handleQuickSettingsKey*) return 0 ;;
-        *'{"handler":"handleHotkeys"'*)
-            list=$(printf '%s' "$cur" | sed -n "s/.*\"$NAME\":\(\[.*\]\).*/\1/p" |
-                sed "s#{\"handler\":\"handleHotkeys\"#{\"handler\":\"handleQuickSettingsKey\",\"file\":\"$HANDLER\"},&#")
-            luna-send -n 1 luna://com.webos.service.config/setConfigs \
-                "{\"configs\":{\"$NAME\":$list}}" </dev/null >/dev/null 2>&1
-            return 0 ;;
+    case "$cur" in *'{"handler":"handleHotkeys"'*) ;; *) return 1 ;; esac
+    list=$(printf '%s' "$cur" | sed -n "s/.*\"$NAME\":\(\[.*\]\).*/\1/p")
+    new=$list
+    case "$new" in
+        *handleQuickSettingsKey*) ;;
+        *) new=$(printf '%s' "$new" |
+            sed "s#{\"handler\":\"handleHotkeys\"#{\"handler\":\"handleQuickSettingsKey\",\"file\":\"$HANDLER\"},&#") ;;
     esac
-    return 1
+    if [ -f "$TRANSITIONS" ]; then
+        case "$new" in
+            *handleTransitionKeys*) ;;
+            *) new=$(printf '%s' "$new" | sed "s#^\[#[{\"handler\":\"handleTransitionKeys\",\"file\":\"$TRANSITIONS\"},#") ;;
+        esac
+    fi
+    [ "$new" = "$list" ] && return 0
+    luna-send -n 1 luna://com.webos.service.config/setConfigs \
+        "{\"configs\":{\"$NAME\":$new}}" </dev/null >/dev/null 2>&1
+    return 0
 }
 
 preload() {

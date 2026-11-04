@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <ctime>
 #include <fstream>
 #include <map>
@@ -470,7 +471,11 @@ void Home::activate() {
     } else if (row_ == kPill) {
         request(col_ == Pill::kControl ? shell::kOpenPanel : shell::kOpenInputs);
     } else if (!tiles_.empty()) {
-        launch_app(tiles_[tile_index(row_, col_)].app.id);
+        // Where the tile is goes first, so the zoom starts as the app is asked for.
+        launched_ = tiles_[tile_index(row_, col_)].app.id;
+        launches_++;
+        publish_tile();
+        launch_app(launched_);
     }
 }
 
@@ -822,6 +827,55 @@ void Home::update(float dt) {
     if (pill_.refresh_clock()) night_.target = night_now() ? 1 : 0;
     watch_control();
     publish();
+    publish_tile();
+}
+
+void Home::tile_colors(const Tile &t, Color *top, Color *bottom) const {
+    uint32_t color = t.app.color;
+    bool seamless = icons_.edge_color(t.app.icon, &color);
+    // A gentle vertical gradient, flat where it has to meet the icon's edge.
+    *top = seamless ? rgb(color) : shade(color, 1.15f, 0.06f);
+    *bottom = seamless ? rgb(color) : shade(color, 0.85f);
+}
+
+std::string Home::tile_json(int index) {
+    const Tile &t = tiles_[index];
+    int row, col;
+    index_to_slot(index, &row, &col);
+    Rect slot = tile_rect(row, col);
+    slot.y -= scroll_.target;
+    float k = 1 + kFocusScale * t.focus.target;
+    Rect s = slot.scaled(k);
+    Color top, bottom;
+    tile_colors(t, &top, &bottom);
+    auto hex = [](Color c) {
+        char buf[8];
+        std::snprintf(buf, sizeof buf, "#%02x%02x%02x", int(std::lround(c.r * 255)), int(std::lround(c.g * 255)),
+                      int(std::lround(c.b * 255)));
+        return std::string(buf);
+    };
+    // Ids and paths come from LG's app list: no quotes or backslashes to escape.
+    Texture icon = icons_.get(t.app.icon);
+    float ih = icon.id ? kIconSize * k : 0, iw = icon.id ? ih * icon.w / icon.h : 0;
+    char json[512];
+    std::snprintf(json, sizeof json,
+                  R"({"n":%d,"id":"%s","x":%.1f,"y":%.1f,"w":%.1f,"h":%.1f,"r":%.1f,"top":"%s","bottom":"%s",)"
+                  R"("icon":"%s","iw":%.1f,"ih":%.1f,"ir":%.1f})",
+                  launches_, t.app.id.c_str(), s.x, s.y, s.w, s.h, kRadius * k, hex(top).c_str(),
+                  hex(bottom).c_str(), icon.id ? t.app.icon.c_str() : "", iw, ih, kIconRadius * k);
+    return json;
+}
+
+void Home::publish_tile() {
+    if (launched_.empty() || !on_tile) return;
+    std::string json;
+    for (int i = 0; i < int(tiles_.size()); i++) {
+        if (tiles_[i].app.id == launched_) json = tile_json(i);
+    }
+    if (json.empty()) launched_.clear();  // hidden or uninstalled
+    if (json == tile_sent_) return;
+    tile_sent_ = json;
+    on_tile(json);
 }
 
 void Home::draw_tile(Painter &p, int index) {
@@ -845,11 +899,8 @@ void Home::draw_tile(Painter &p, int index) {
     }
     // The shine moves with the lean and rests once the tile is still.
     float sx = kShineX + tile.lean_x.x * kShineTravel, sy = kShineY + tile.lean_y.x * kShineTravel;
-    uint32_t color = tile.app.color;
-    bool seamless = icons_.edge_color(tile.app.icon, &color);
-    // A gentle vertical gradient, flat where it has to meet the icon's edge.
-    Color top = seamless ? rgb(color) : shade(color, 1.15f, 0.06f);
-    Color bottom = seamless ? rgb(color) : shade(color, 0.85f);
+    Color top, bottom;
+    tile_colors(tile, &top, &bottom);
     float radius = kRadius * k;
     p.fill(s, radius, top, bottom);
 

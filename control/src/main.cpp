@@ -16,6 +16,7 @@
 #include "bluetooth.h"
 #include "gfx.h"
 #include "inputs.h"
+#include "lg_sdl.h"
 #include "log.h"
 #include "luna.h"
 #include "overlay.h"
@@ -154,7 +155,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     // Before the first frame: the compositor reads the type when it maps the surface.
-    bool overlay = overlay::set_property(window, "_WEBOS_WINDOW_TYPE", "_WEBOS_WINDOW_TYPE_OVERLAY");
+    bool overlay = lg_sdl::set_property(window, "_WEBOS_WINDOW_TYPE", "_WEBOS_WINDOW_TYPE_OVERLAY");
     bool relaunch = overlay && overlay::hook_relaunch();
     // Without them, an ordinary full-screen window that closes when done.
     bool resident = overlay && relaunch;
@@ -162,8 +163,8 @@ int main(int argc, char **argv) {
     if (start_hidden && !resident) return 0;
     // An overlay is closed when another app comes to the front, unless it asks
     // to stay: then surface-manager leaves it to the app (StarfishOverlaySurface.qml).
-    if (resident) overlay::set_property(window, "keepWindowOnAppSwitch", "true");
-    if (start_hidden) overlay::set_property(window, "windowPosX", "1920");
+    if (resident) lg_sdl::set_property(window, "keepWindowOnAppSwitch", "true");
+    if (start_hidden) lg_sdl::set_property(window, "windowPosX", "1920");
 
     SDL_GLContext gl = SDL_GL_CreateContext(window);
     if (!gl) {
@@ -251,15 +252,15 @@ int main(int argc, char **argv) {
         panel.open(root, over_home);
         pill_button = root_button();
         if (resident) {
-            if (!on_screen) overlay::set_property(window, "windowPosX", "0");
-            overlay::set_property(window, "needFocus", "true");
+            if (!on_screen) lg_sdl::set_property(window, "windowPosX", "0");
+            lg_sdl::set_property(window, "needFocus", "true");
         }
         on_screen = true;
     };
     // The remote goes back to the app at once; the panel fades out.
     auto close = [&](bool fade) {
         if (!panel.is_open()) return;
-        if (resident) overlay::set_property(window, "needFocus", "false");
+        if (resident) lg_sdl::set_property(window, "needFocus", "false");
         // Focus on the pill stays where it is: Home moves its own there. So
         // does the button of the menu that was open, if Home's focus is in the
         // pill (it opened the other one from there).
@@ -316,8 +317,8 @@ int main(int argc, char **argv) {
                 resident) {
                 // The compositor gives a new overlay the remote even when it asks
                 // not to ("false" reads as true then); it lets go on a change.
-                overlay::set_property(window, "needFocus", "true");
-                overlay::set_property(window, "needFocus", "false");
+                lg_sdl::set_property(window, "needFocus", "true");
+                lg_sdl::set_property(window, "needFocus", "false");
             }
             if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_LEAVE) me.pointer_button = -1;
             bool pill_visible = panel.is_open() || (home_front() && home.pill_alpha > 0.5f);
@@ -456,7 +457,7 @@ int main(int argc, char **argv) {
         frame.minute = local.tm_min;
 
         if (want_on_screen && !on_screen && resident) {
-            overlay::set_property(window, "windowPosX", "0");
+            lg_sdl::set_property(window, "windowPosX", "0");
             on_screen = true;
             last_pill = PillFrame{};  // draw it
         }
@@ -486,7 +487,7 @@ int main(int argc, char **argv) {
         last_pill = frame;
         if (!want_on_screen && resident && (on_screen || premap)) {
             // The empty frame is up: out of the way, so it costs the compositor nothing.
-            overlay::set_property(window, "windowPosX", "1920");
+            lg_sdl::set_property(window, "windowPosX", "1920");
             on_screen = false;
             premap = false;
             drew = false;
