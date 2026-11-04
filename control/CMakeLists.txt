@@ -32,6 +32,6 @@ add_executable(control
   src/tv.cpp
 )
 target_compile_options(control PRIVATE -Wall -Wextra)
-target_link_libraries(control PRIVATE lgtv_common PkgConfig::SDL2_IMAGE dl)
+target_link_libraries(control PRIVATE lgtv_common PkgConfig::SDL2_IMAGE wayland-client dl)
 # The toolchain's GCC is newer than the TV's libstdc++; carry our own.
 target_link_options(control PRIVATE -static-libstdc++ -static-libgcc)

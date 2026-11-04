@@ -5,6 +5,11 @@
 // a glass dock of favourite apps, and the grid of all other apps below it.
 // Moving down into the grid scrolls the page up and blurs the wallpaper.
 //
+// The pill is drawn by the Control Center (control/), the overlay app that is
+// on screen everywhere; Home lays it out, moves focus through it and publishes
+// how it should look in the shared state (common/shell_state.h). Inputs and
+// the Control Center open there.
+//
 // Long-pressing OK on a tile opens a menu to move or hide it. Moving picks the
 // tile up (it wiggles) and the arrows carry it through the dock and grid.
 // The gear button beside Inputs opens the settings sheet: wallpapers and the
@@ -14,6 +19,8 @@
 #include "gfx.h"
 #include "icons.h"
 #include "layout.h"
+#include "pill.h"
+#include "shell_state.h"
 #include "spring.h"
 #include "wallpaper.h"
 
@@ -42,7 +49,6 @@ public:
 
     // All of LG's launch points; the layout decides order and what is hidden.
     void set_apps(const std::vector<App> &apps);
-    void set_inputs(const std::vector<Input> &inputs);
     // Shown in the empty dock while there are no apps: why (empty: nothing).
     void set_status(const std::string &message);
     // Where the layout is saved (empty: nowhere yet); loads it and its
@@ -51,7 +57,8 @@ public:
     // Loads every tile's icon before returning, for a complete first frame.
     void load_icons_now(int timeout_ms);
 
-    std::function<void(const std::string &app_id)> on_launch;  // apps, inputs and the Control Center
+    // Apps, and the Control Center when it isn't running. params: JSON, or empty.
+    std::function<void(const std::string &app_id, const std::string &params)> on_launch;
 
 private:
     // Focus rows: kPill is the status pill (column 0 Inputs, 1 Control Center,
@@ -68,14 +75,12 @@ private:
         Spring x, y;            // drawn position, sliding to its slot
     };
 
-    // A glass list of rows with a sliding highlight: the Inputs panel and the
-    // tile menu.
+    // A glass list of rows with a sliding highlight: the tile menu and Home
+    // Settings.
     struct Menu {
         struct Row {
             Texture label, detail;  // detail: dim text at the right, may be empty
             Texture thumb;          // a small picture left of the detail (not owned)
-            bool dot = false;
-            uint32_t dot_color = 0;
         };
         std::vector<Row> rows;
         Texture title;  // optional header
@@ -86,7 +91,6 @@ private:
 
         void show();
         void hide() { open = false, anim.target = 0; }
-        void clear();
     };
     enum class MenuResult { kNone, kChosen, kClosed };
 
@@ -126,7 +130,13 @@ private:
     bool night_now() const;
 
     void draw_tile(Painter &p, int index);
-    void refresh_clock();
+
+    // The Control Center: what Home publishes for it and asks of it.
+    void request(shell::Request r);
+    void launch_app(const std::string &app_id);
+    void watch_control();  // its requests, its pointer over the pill, whether it runs
+    void publish();
+    bool front();          // whether Home is the app in front
 
     int w_ = 0, h_ = 0;
     std::string assets_;
@@ -141,8 +151,8 @@ private:
 
     int row_ = 0, col_ = 0, dock_col_ = 0;
     Spring scroll_, grid_;
-    static constexpr int kPillButtons = 3;
-    Spring pill_focus_[kPillButtons];  // Inputs, Control Center, settings
+    Pill pill_;
+    Spring pill_focus_[Pill::kButtons];  // Inputs, Control Center, settings
     float time_ = 0;
 
     // OK (or the pointer button) held down, for long presses.
@@ -152,14 +162,19 @@ private:
     bool pointer_ = false;  // the pointer is in use (until a key is pressed)
     float px_ = 0, py_ = 0;
     bool rehover_ = false;  // re-pick the tile under the pointer once a wheel scroll settles
-    Rect button_rect_[kPillButtons]{};  // where render() last drew the pill's buttons
 
-    Texture clock_, inputs_label_;
     Texture status_;
-    int clock_minute_ = -1;
 
-    std::vector<Input> inputs_;
-    Menu inputs_menu_;
+    shell::State shared_;
+    shell::HomeState published_;
+    uint32_t control_seq_ = 0;          // the last request from the Control Center handled
+    uint32_t control_pointer_seq_ = 0;  // its pointer's last move onto a pill button
+    uint64_t preloaded_ms_ = 0;         // when Home last loaded it
+    long long foreground_written_ = -1;  // /tmp/lgtv-control.foreground's mtime when last read
+    bool foreground_home_ = true;
+    uint64_t leaving_until_ = 0;        // an app was just launched: the pill goes before LG switches
+    long long leaving_written_ = 0;
+
     Menu tile_menu_;  // Move, Hide
     Menu settings_;
     bool moving_ = false;

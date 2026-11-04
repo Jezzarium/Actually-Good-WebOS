@@ -12,7 +12,7 @@ artwork that changes with the focused app.
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │                                  ┌─────────────────────────┐ │
-│                                  │ 9:41  [Inputs] [◐] [⚙]  │ │  status pill
+│                                  │ 9:41    [⇥]  [◐]  [⚙]   │ │  status pill
 │                                  └─────────────────────────┘ │
 │                         wallpaper                            │
 │                                                              │
@@ -25,10 +25,18 @@ artwork that changes with the focused app.
 
 - **Wallpaper:** full screen and still, chosen in Home Settings. At night (automatic from 7 PM to
   7 AM, or always) it dims with a cool tint and the dock glass turns smoky.
-- **Status pill:** the clock, an **Inputs** button (a panel of HDMI inputs with their CEC names;
+- **Status pill:** the clock, an **Inputs** button (an arrow into a screen: a menu of HDMI inputs with their CEC names;
   choosing one switches to it), a pair of switches for the **Control Center** (the overlay app in
   `control/`, which drops from under the pill) and a gear for **Home Settings**. Up from the dock
-  reaches it.
+  reaches it. The Control Center draws it (`common/pill.cpp`), the only one of our apps on screen
+  everywhere, so it looks the same over apps (there without the gear). Home still lays it out,
+  moves focus through it and fades it out in the grid: every frame it publishes the pill's fade and
+  focus springs in `/tmp/lgtv-shell.state` (`common/shell_state.h`), and OK on Inputs or the
+  Control Center becomes a request there, which the Control Center picks up within a frame or two
+  (Home launches it if it isn't running). The other way, the Control Center asks Home to open Home
+  Settings (the gear clicked or chosen in its pill) or to move focus to the button it was on, and
+  says when the pointer is over a button. Home reloads it, hidden, whenever it hasn't said it is
+  alive for a second. Launching an app hides the pill at once, before LG switches.
 - **Dock:** six favourite apps on frosted glass. Tiles are the app's colour with its icon
   centred; full-square store icons get a tile of their own edge colour so they look full-bleed.
 - **Focus:** the focused tile grows 10% on a spring and lifts with a shadow. A small lean carries
@@ -67,8 +75,8 @@ also come from the TV. Everything on screen is a rounded rectangle drawn by one 
   settings, user wallpapers). Nothing persists across reboots except that folder.
 - **Luna:** directly through `libluna-service2`, registered anonymously (LG's SDL already holds the
   app's own name in-process), pumped once per frame on the GLib main context.
-  `applicationManager/listLaunchPoints` (subscribed), `applicationManager/launch` and
-  `eim/getAllInputStatus` (subscribed) all work from `public`.
+  `applicationManager/listLaunchPoints` (subscribed) and `applicationManager/launch` work from
+  `public`, as does `eim/getAllInputStatus` (subscribed; the Control Center's Inputs menu uses it).
 - **Remote:** Back and Exit reach the app through SDL's webOS access-policy hints instead of LG's
   "exit the app?" dialog; they arrive as webOS scancodes, as do Play (450) and the pointer's
   show/hide events. The Magic Remote pointer arrives as ordinary mouse events.
@@ -100,17 +108,17 @@ also come from the TV. Everything on screen is a rounded rectangle drawn by one 
 - **Sunrise and sunset** for automatic appearance, instead of fixed hours.
 - **Desktop build:** `./build.py --host` compiles with the system SDL2, but needs `sdl2_ttf` and
   `sdl2_image`, and has no TV services: the dock says it can't reach the app manager.
-- **Input status:** the TV reports every HDMI port as connected, so the panel's dots don't yet
-  show which ports have a signal.
+- **Input status:** the TV reports every HDMI port as connected, so the Inputs menu's dots don't
+  yet show which ports have a signal.
 
 ## Folders
 
 ```
 home/
-  src/          C++ sources (main, home screen, wallpaper, icons, layout, apps); drawing and Luna
-                are in ../common, shared with the Control Center
-  assets/       wallpapers/ (bundled) and icons/ (packaged into the app)
+  src/          C++ sources (main, home screen, wallpaper, icons, layout, apps); drawing, Luna,
+                the pill's layout and the shared state are in ../common, shared with the Control Center
+  assets/       wallpapers/ (bundled, packaged into the app)
   tv/           appinfo.json and app icons (packaged as-is)
-  tools/        key.sh: press remote keys and capture the screen over ssh
+  tools/        key.sh: press remote keys and capture the screen over ssh; install.sh
   build.py      cross build with CMake and .ipk packaging (../common/native_build.py; --host for a desktop build)
 ```

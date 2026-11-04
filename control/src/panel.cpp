@@ -6,15 +6,13 @@
 
 #include <algorithm>
 #include <cmath>
-#include <fstream>
 
 #include <sys/stat.h>
 
 namespace {
 
-// Drops from where Home's status pill ends (its right edge and bottom).
-constexpr float kPanelW = 600, kPanelRight = 1839, kPanelTop = 142, kPanelRadius = 30;
-constexpr float kMaxHeight = 1080 - kPanelTop - 48;
+// Hangs from the pill (set_anchor); the inputs list is as wide as Home's menu was.
+constexpr float kPanelW = 600, kInputsW = 480, kPanelRadius = 30;
 constexpr float kPad = 12, kGap = 12, kCellRadius = 18;
 constexpr float kInner = kPanelW - 2 * kPad;
 constexpr float kSliderH = 84, kTileH = 96, kButtonH = 104, kRowH = 72, kHeaderH = 72;
@@ -64,23 +62,6 @@ const char *kLgSettings = "com.palm.app.settings";
 // Home. An overlay can't see what's below it, so over other apps the glass is
 // a plain dark colour instead.
 const char *kBackdrop = "/tmp/lgtv-home-backdrop.bmp";
-const char *kHome = "com.lgtvtweaks.home";
-// The foreground app's id: tv/settings-key writes it on every change.
-const char *kForeground = "/tmp/lgtv-control.foreground";
-
-std::string foreground_app() {
-    std::ifstream f(kForeground);
-    std::string id;
-    std::getline(f, id);
-    return id;
-}
-
-// When the file was last written; zero if it isn't there.
-long long foreground_written() {
-    struct stat st;
-    if (stat(kForeground, &st) != 0) return 0;
-    return st.st_mtim.tv_sec * 1000000000LL + st.st_mtim.tv_nsec;
-}
 
 bool inside(Rect r, float x, float y) { return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h; }
 
@@ -134,8 +115,19 @@ bool Panel::init(const std::string &font_dir, const std::string &icons_dir, Tv *
     stack_.push_back(std::make_unique<Page>());
     build(*stack_.back());
     height_.snap(stack_.back()->height);
+    width_.snap(kPanelW);
+    active_.snap(1);
     return true;
 }
+
+void Panel::set_anchor(float right, float top) {
+    right_ = right;
+    top_ = top;
+}
+
+float Panel::width_of(const Page &page) { return page.kind == Page::kInputs ? kInputsW : kPanelW; }
+
+float Panel::max_height() const { return 1080 - top_ - 48; }
 
 Texture Panel::icon(const std::string &name) {
     auto it = icons_.find(name);
@@ -232,17 +224,21 @@ void Panel::build(Page &page) {
         page.grid.push_back(row);
         page.height = y + kButtonH + kPad;
     } else {
-        Cell header;
-        header.type = Type::kHeader;
-        header.key = "header";
-        header.icon = "back";
-        header.label_text = page.title;
-        header.activate = [this]() { pop(); };
-        header.rect = {kPad, kPad, kInner, kHeaderH};
-        page.grid.push_back({add(header)});
-        float y = kPad + kHeaderH;
+        float inner = width_of(page) - 2 * kPad;
+        float y = kPad;
+        if (has_header(page)) {
+            Cell header;
+            header.type = Type::kHeader;
+            header.key = "header";
+            header.icon = "back";
+            header.label_text = page.title;
+            header.activate = [this]() { pop(); };
+            header.rect = {kPad, kPad, inner, kHeaderH};
+            page.grid.push_back({add(header)});
+            y += kHeaderH;
+        }
         auto row = [&](Cell c) {
-            c.rect = {kPad, y, kInner, kRowH};
+            c.rect = {kPad, y, inner, kRowH};
             y += kRowH;
             page.grid.push_back({add(std::move(c))});
         };
@@ -317,6 +313,25 @@ void Panel::build(Page &page) {
             bool searching = bt_->searching();
             row(action_row("search", searching ? "Searching…" : "Search for devices", "search",
                            [this]() { bt_->search(!bt_->searching()); }, false));
+        } else if (page.kind == Page::kInputs) {
+            for (const Input &input : inputs_) {
+                Cell c;
+                c.key = "input:" + input.app_id;
+                c.label_text = input.label;
+                // The port only when the name doesn't already say it.
+                if (input.label != input.port) c.value_text = input.port;
+                c.dot = input.connected ? 0x30d158 : 0x8e8e93;
+                std::string id = input.app_id;
+                c.activate = [this, id]() { tv_->launch(id, "", [this](bool ok) { if (ok && on_close) on_close(); }); };
+                row(c);
+            }
+            if (inputs_.empty()) {
+                // Says so rather than opening nothing; choosing it does nothing.
+                Cell c;
+                c.key = "none";
+                c.label_text = "No inputs found";
+                row(c);
+            }
         }
         page.height = y + kPad;
     }
@@ -339,6 +354,9 @@ std::string Panel::shape_of(const Page &page) const {
         if (const Section *s = section(page.arg)) {
             for (const std::string &id : s->ids) shape += tv_->visible(id) ? "1" : "0";
         }
+        break;
+    case Page::kInputs:
+        for (const Input &i : inputs_) shape += "|" + i.app_id + i.label + (i.connected ? "c" : "");
         break;
     case Page::kBluetooth:
         shape = bt_->searching() ? "s" : "";
@@ -376,6 +394,7 @@ void Panel::refresh(Cell &cell) {
         if (cell.type == Type::kButton) room = cell.rect.w - 20;
         if (cell.type == Type::kTile) room = cell.rect.w - kTextLeft - kIcon - 18 - 16;
         if (!cell.icon.empty() && cell.type == Type::kRow) room -= kIcon + 18;
+        if (cell.dot) room -= 30;
         if (cell.type == Type::kRow && (cell.chevron || !cell.value_text.empty() || !cell.id.empty())) room *= 0.6f;
         TTF_Font *font = cell.type == Type::kTile     ? small_font_
                          : cell.type == Type::kHeader ? title_font_
@@ -463,33 +482,62 @@ void Panel::load_backdrop() {
     SDL_FreeSurface(s);
 }
 
-void Panel::open() {
-    foreground_written_ = foreground_written();
-    opened_over_ = foreground_app();
-    over_home_ = opened_over_ == kHome;
+Panel::Root Panel::root() const { return stack_.front()->kind == Page::kInputs ? Root::kInputs : Root::kSettings; }
+
+void Panel::open(Root root, bool over_home) {
+    bool switching = open_;
+    if (switching && root == this->root() && stack_.size() == 1) return;
+    over_home_ = over_home;
     if (over_home_) load_backdrop();
-    while (stack_.size() > 1) stack_.pop_back();
-    bt_->set_active(false);
-    Page &main = *stack_.back();
-    main.row = main.col = 0;
-    for (Cell &c : main.cells) c.focus.snap(0);
+    while (stack_.size() > 1) {
+        if (stack_.back()->kind == Page::kBluetooth) bt_->set_active(false);
+        stack_.pop_back();
+    }
+    Page::Kind kind = root == Root::kInputs ? Page::kInputs : Page::kMain;
+    if (stack_.front()->kind != kind) {
+        auto page = std::make_unique<Page>();
+        page->kind = kind;
+        build(*page);
+        stack_.front() = std::move(page);
+    }
+    Page &first = *stack_.front();
+    first.row = first.col = 0;
+    for (Cell &c : first.cells) c.focus.snap(0);
     set_focus(0, 0);
-    std::vector<std::string> ids = {"backlight"};
-    ids.insert(ids.end(), kQuickTiles.begin(), kQuickTiles.end());
-    tv_->load(ids);
+    scroll_into_view(first, true);
+    first.highlight.snap(first.highlight.target);
+    if (kind == Page::kMain) {
+        std::vector<std::string> ids = {"backlight"};
+        ids.insert(ids.end(), kQuickTiles.begin(), kQuickTiles.end());
+        tv_->load(ids);
+    }
     open_ = true;
+    anim_.target = 1;
+    active_on_ = true;
+    active_.target = 1;
+    if (switching) {
+        // From one root to the other: the page slides in, the panel springs to its size.
+        slide_.snap(0);
+        slide_.target = 1;
+        slide_dir_ = kind == Page::kInputs ? -1 : 1;
+        return;
+    }
     anim_.snap(0);
     anim_.target = 1;
-    height_.snap(main.height);
+    active_.snap(1);
+    height_.snap(std::min(first.height, max_height()));
+    width_.snap(width_of(first));
     slide_.snap(1);
 }
 
-bool Panel::app_switched() {
-    if (!open_) return false;
-    long long written = foreground_written();
-    if (written == foreground_written_) return false;
-    foreground_written_ = written;
-    return foreground_app() != opened_over_;
+void Panel::set_active(bool active) {
+    active_on_ = active;
+    active_.target = active ? 1 : 0;
+}
+
+void Panel::set_inputs(const std::vector<Input> &inputs) {
+    inputs_ = inputs;
+    setting_changed("");
 }
 
 void Panel::close(bool fade) {
@@ -528,6 +576,10 @@ void Panel::move_focus(int dr, int dc) {
         return;
     }
     int row = page.row + dr;
+    if (row < 0 && on_leave_top) {
+        on_leave_top();
+        return;
+    }
     if (row < 0 || row >= int(page.grid.size())) {
         page.highlight.v += dr * 300;  // bump at the ends, like Home's menus
         return;
@@ -547,8 +599,8 @@ void Panel::move_focus(int dr, int dc) {
 }
 
 void Panel::scroll_into_view(Page &page, bool snap) {
-    float view_h = std::min(page.height, kMaxHeight);
-    float top = page.list ? kPad + kHeaderH : kPad;
+    float view_h = std::min(page.height, max_height());
+    float top = has_header(page) ? kPad + kHeaderH : kPad;
     float max_scroll = std::max(0.f, page.height - view_h);
     float target = 0;
     if (max_scroll > 0 && !page.grid.empty()) {
@@ -619,11 +671,12 @@ void Panel::options() {
 
 // --- Pointer ---------------------------------------------------------------
 
-Rect Panel::panel_rect() const {
+Rect Panel::rect() const {
     float a = std::clamp(anim_.x, 0.f, 1.f);
+    float w = std::round(width_.x);
     // Whole pixels while it drops in: text rounded to pixels inside a panel at
     // a sub-pixel offset flickers between two rows.
-    return {kPanelRight - kPanelW, std::round(kPanelTop - 18 * (1 - a)), kPanelW, std::round(height_.x)};
+    return {right_ - w, std::round(top_ - 18 * (1 - a)), w, std::round(height_.x)};
 }
 
 void Panel::pointer_move(float x, float y) {
@@ -632,7 +685,7 @@ void Panel::pointer_move(float x, float y) {
     py_ = y;
     if (!open_) return;
     Page &page = *stack_.back();
-    Rect pr = panel_rect();
+    Rect pr = rect();
     for (size_t r = 0; r < page.grid.size(); r++) {
         for (size_t c = 0; c < page.grid[r].size(); c++) {
             const Cell &cell = page.cells[page.grid[r][c]];
@@ -641,7 +694,7 @@ void Panel::pointer_move(float x, float y) {
             cr.y += pr.y;
             // Rows scroll under the fixed header.
             if (cell.type != Type::kHeader) {
-                if (page.list && y < pr.y + kPad + kHeaderH) continue;
+                if (has_header(page) && y < pr.y + kPad + kHeaderH) continue;
                 cr.y -= page.scroll.x;
             }
             if (inside(cr, x, y) && (int(r) != page.row || int(c) != page.col)) set_focus(int(r), int(c));
@@ -652,12 +705,12 @@ void Panel::pointer_move(float x, float y) {
 void Panel::pointer_click() {
     if (!open_) return;
     Page &page = *stack_.back();
-    Rect pr = panel_rect();
+    Rect pr = rect();
     if (!inside(pr, px_, py_)) {
         if (on_close) on_close();
         return;
     }
-    if (page.list && inside({pr.x + kPad, pr.y + kPad, kInner, kHeaderH}, px_, py_)) {
+    if (has_header(page) && inside({pr.x + kPad, pr.y + kPad, pr.w - 2 * kPad, kHeaderH}, px_, py_)) {
         pop();
         return;
     }
@@ -710,10 +763,13 @@ void Panel::show_toast(const std::string &message) {
 
 void Panel::update(float dt) {
     anim_.step(dt, kFocusStiffness, kFocusDamping);
+    active_.step(dt, kFocusStiffness, kFocusDamping);
     slide_.step(dt, kSlideStiffness, kSlideDamping);
     Page &page = *stack_.back();
-    height_.target = std::min(page.height, kMaxHeight);
+    height_.target = std::min(page.height, max_height());
     height_.step(dt, kSlideStiffness, kSlideDamping);
+    width_.target = width_of(*stack_.front());
+    width_.step(dt, kSlideStiffness, kSlideDamping);
     page.scroll.step(dt, kFocusStiffness, kFocusDamping);
     page.highlight.step(dt, kFocusStiffness, kFocusDamping);
     for (Cell &c : page.cells) c.focus.step(dt, kFocusStiffness, kFocusDamping);
@@ -721,7 +777,9 @@ void Panel::update(float dt) {
 }
 
 void Panel::draw_cell(Painter &p, Page &page, Cell &cell, float ox, float oy, float alpha) {
-    float f = std::clamp(cell.focus.x, 0.f, 1.f);
+    // Unlit while focus is on the pill.
+    float act = std::clamp(active_.x, 0.f, 1.f);
+    float f = std::clamp(cell.focus.x, 0.f, 1.f) * act;
     Rect r{ox + cell.rect.x, oy + cell.rect.y, cell.rect.w, cell.rect.h};
     float a = alpha * (cell.disabled ? 0.4f : 1);
     // In lists the sliding highlight is the focus; elsewhere each cell lights up.
@@ -729,7 +787,7 @@ void Panel::draw_cell(Painter &p, Page &page, Cell &cell, float ox, float oy, fl
     if (page.list) {
         // The header doesn't scroll; the highlight is drawn scrolled.
         float row_y = cell.type == Type::kHeader ? cell.rect.y + page.scroll.x : cell.rect.y;
-        lit = std::clamp(1 - std::abs(page.highlight.x - row_y) / kRowH, 0.f, 1.f);
+        lit = std::clamp(1 - std::abs(page.highlight.x - row_y) / kRowH, 0.f, 1.f) * act;
     }
 
     float radius = kCellRadius;
@@ -770,6 +828,10 @@ void Panel::draw_cell(Painter &p, Page &page, Cell &cell, float ox, float oy, fl
     if (ic.id) {
         p.image({tx - 4, std::round(cy - kIcon / 2), kIcon, kIcon}, 0, ic, c, a);
         tx += kIcon + 14;
+    }
+    if (cell.dot) {
+        p.fill({tx, std::round(cy - 6), 12, 12}, 6, rgb(cell.dot), rgb(cell.dot), a);
+        tx += 30;
     }
     if (cell.type == Type::kTile) {
         // Label over value.
@@ -820,7 +882,7 @@ void Panel::render(Painter &p) {
     float a = std::clamp(anim_.x, 0.f, 1.f);
     if (a < 0.01f) return;
     Page &page = *stack_.back();
-    Rect pr = panel_rect();
+    Rect pr = rect();
 
     // The same glass as Home's menus.
     p.shadow(pr, kPanelRadius, 40, rgb(0x000000, 0.45f), a);
@@ -842,11 +904,11 @@ void Panel::render(Painter &p) {
     glScissor(int(pr.x), int(1080 - (pr.y + pr.h)), int(pr.w), int(pr.h));
     // The list's highlight, over the header too (rows only pass under it).
     if (page.list && !page.grid.empty()) {
-        Rect h{ox + kPad, oy + page.highlight.x - page.scroll.x, kInner, kRowH};
-        p.fill(h, kCellRadius, rgb(0xffffff), rgb(0xffffff), pa);
+        Rect h{ox + kPad, oy + page.highlight.x - page.scroll.x, width_of(page) - 2 * kPad, kRowH};
+        p.fill(h, kCellRadius, rgb(0xffffff), rgb(0xffffff), pa * std::clamp(active_.x, 0.f, 1.f));
     }
     // Lists scroll under a fixed header; clip to the panel.
-    float top = page.list ? kPad + kHeaderH : 0;
+    float top = has_header(page) ? kPad + kHeaderH : 0;
     glScissor(int(pr.x), int(1080 - (pr.y + pr.h)), int(pr.w), int(pr.h - top));
     draw_page(p, page, ox, oy, pa);
     glDisable(GL_SCISSOR_TEST);

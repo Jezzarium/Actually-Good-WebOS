@@ -25,13 +25,3 @@ std::vector<App> apps_from_launch_points(json_object *reply, const std::string &
 std::vector<App> load_apps(const std::string &path);
 void save_apps(const std::string &path, const std::vector<App> &apps);
 bool operator==(const App &a, const App &b);
-
-// An external input (HDMI), from com.webos.service.eim/getAllInputStatus.
-struct Input {
-    std::string label;   // the device's name over CEC if it has one, else "HDMI 2"
-    std::string port;    // "HDMI 2"
-    std::string app_id;  // launching it switches to the input
-    bool connected;
-};
-
-std::vector<Input> inputs_from_status(json_object *reply);

@@ -1,6 +1,11 @@
+// The sysroot's SDL config leaves Wayland out of SDL_SysWMinfo; LG's build has it.
+#define SDL_VIDEO_DRIVER_WAYLAND 1
 #include "overlay.h"
 
 #include "log.h"
+
+#include <SDL_syswm.h>
+#include <wayland-client.h>
 
 #include <atomic>
 #include <cstdint>
@@ -80,6 +85,34 @@ void on_relaunch(void *device, SDL_Window *window) {
     relaunch_original(device, window);
 }
 
+// Binds wl_compositor on a queue of our own, so SDL's events stay where SDL
+// dispatches them.
+wl_compositor *bind_compositor(wl_display *display) {
+    wl_event_queue *queue = wl_display_create_queue(display);
+    auto *wrapper = static_cast<wl_display *>(wl_proxy_create_wrapper(display));
+    if (!queue || !wrapper) return nullptr;
+    wl_proxy_set_queue(reinterpret_cast<wl_proxy *>(wrapper), queue);
+    wl_registry *registry = wl_display_get_registry(wrapper);
+    wl_proxy_wrapper_destroy(wrapper);
+    wl_compositor *compositor = nullptr;
+    static const wl_registry_listener listener = {
+        [](void *data, wl_registry *registry, uint32_t name, const char *interface, uint32_t) {
+            auto **out = static_cast<wl_compositor **>(data);
+            if (!*out && std::strcmp(interface, wl_compositor_interface.name) == 0) {
+                *out = static_cast<wl_compositor *>(wl_registry_bind(registry, name, &wl_compositor_interface, 1));
+            }
+        },
+        [](void *, wl_registry *, uint32_t) {},
+    };
+    wl_registry_add_listener(registry, &listener, &compositor);
+    wl_display_roundtrip_queue(display, queue);
+    wl_registry_destroy(registry);
+    // It sends no events; off our queue before the queue goes.
+    if (compositor) wl_proxy_set_queue(reinterpret_cast<wl_proxy *>(compositor), nullptr);
+    wl_event_queue_destroy(queue);
+    return compositor;
+}
+
 }  // namespace
 
 bool set_property(SDL_Window *window, const char *name, const char *value) {
@@ -111,5 +144,24 @@ bool hook_relaunch() {
 }
 
 bool take_relaunch() { return relaunched.exchange(false); }
+
+bool set_input_region(SDL_Window *window, int x, int y, int w, int h) {
+    SDL_SysWMinfo info;
+    SDL_VERSION(&info.version);
+    if (!SDL_GetWindowWMInfo(window, &info) || info.subsystem != SDL_SYSWM_WAYLAND || !info.info.wl.display ||
+        !info.info.wl.surface) {
+        return false;
+    }
+    static wl_compositor *compositor = bind_compositor(info.info.wl.display);
+    if (!compositor) return false;
+    wl_region *region = wl_compositor_create_region(compositor);
+    if (w > 0 && h > 0) wl_region_add(region, x, y, w, h);
+    wl_surface_set_input_region(info.info.wl.surface, region);
+    wl_region_destroy(region);
+    // Applied on commit; nothing new is attached, so the picture stays.
+    wl_surface_commit(info.info.wl.surface);
+    wl_display_flush(info.info.wl.display);
+    return true;
+}
 
 }  // namespace overlay

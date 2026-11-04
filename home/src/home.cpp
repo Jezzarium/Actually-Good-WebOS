@@ -5,10 +5,12 @@
 #include <algorithm>
 #include <cmath>
 #include <ctime>
+#include <fstream>
 #include <map>
 #include <set>
 
 #include <dirent.h>
+#include <sys/stat.h>
 
 namespace {
 
@@ -42,12 +44,23 @@ constexpr float kLongPress = 0.6f;
 // The picked-up tile's wiggle: radians either way, and how fast.
 constexpr float kWiggleAngle = 0.035f, kWiggleSpeed = 15;
 
-// Menus (Inputs, the tile menu).
+// Menus (the tile menu, Home Settings).
 constexpr float kMenuPad = 12, kMenuRowH = 72, kMenuRadius = 30;
-constexpr float kInputsW = 480, kTileMenuW = 300, kSettingsW = 820, kMenuTitleH = 92;
+constexpr float kTileMenuW = 300, kSettingsW = 820, kMenuTitleH = 92;
 
-// The Control Center (control/): an overlay app, opened by the pill's middle button.
+// The Control Center (control/): an overlay app that draws the pill and opens
+// from it.
 const char *kControlCenter = "com.lgtvtweaks.control";
+const char *kHomeId = "com.lgtvtweaks.home";
+// The app in front: tv/settings-key writes its id on every change.
+const char *kForeground = "/tmp/lgtv-control.foreground";
+// The Control Center counts as running while it says so this recently (it
+// does several times a second); otherwise Home loads it again, hidden, at
+// most every kPreloadInterval.
+constexpr uint64_t kControlAlive = 1000, kPreloadInterval = 10000;
+// After launching an app, the pill stays hidden until the foreground changes,
+// or this long if the launch goes nowhere.
+constexpr uint64_t kLeavingTime = 3000;
 
 // Wallpapers: bundled in assets/wallpapers, plus any the user copies here.
 const char *kUserWallpapers = "/var/lib/lgtv-home/wallpapers";
@@ -67,20 +80,19 @@ bool inside(Rect r, float x, float y) {
     return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 }
 
+// When the foreground file was last written; zero if it isn't there.
+long long foreground_written() {
+    struct stat st;
+    if (stat(kForeground, &st) != 0) return 0;
+    return st.st_mtim.tv_sec * 1000000000LL + st.st_mtim.tv_nsec;
+}
+
 }  // namespace
 
 void Home::Menu::show() {
     open = true;
     anim.target = 1;
     highlight.snap(float(focus));
-}
-
-void Home::Menu::clear() {
-    for (Row &row : rows) {
-        destroy(row.label);
-        destroy(row.detail);
-    }
-    rows.clear();
 }
 
 bool Home::init(int w, int h, const char *font_path, const std::string &assets) {
@@ -97,7 +109,7 @@ bool Home::init(int w, int h, const char *font_path, const std::string &assets) 
         return false;
     }
 
-    inputs_label_ = render_text(pill_font_, "Inputs");
+    pill_.init(pill_font_);
     for (const char *action : {"Move", "Hide"}) {
         Menu::Row row;
         row.label = render_text(pill_font_, action);
@@ -109,8 +121,11 @@ bool Home::init(int w, int h, const char *font_path, const std::string &assets) 
         row.label = render_text(pill_font_, name);
         settings_.rows.push_back(row);
     }
-    refresh_clock();
-    set_inputs({});
+    night_.target = night_now() ? 1 : 0;
+    if (!shared_.open()) LOG("home: no shared state; the Control Center can't draw the pill");
+    control_seq_ = shared_.control().request_seq;
+    control_pointer_seq_ = shared_.control().pointer_seq;
+    published_ = shared_.home();
     return true;
 }
 
@@ -237,7 +252,7 @@ void Home::set_layout_path(const std::string &path) {
 }
 
 void Home::load_icons_now(int timeout_ms) {
-    std::vector<std::string> paths{assets_ + "/icons/settings.png", assets_ + "/icons/control.png"};
+    std::vector<std::string> paths;
     for (const Tile &t : tiles_) paths.push_back(t.app.icon);
     icons_.load_now(paths, timeout_ms);
 }
@@ -308,7 +323,7 @@ int Home::row_count() const {
 }
 
 int Home::row_length(int row) const {
-    if (row == kPill) return kPillButtons;
+    if (row == kPill) return Pill::kButtons;
     if (row == 0) return dock_count();
     int first = dock_count() + (row - 1) * kCols;
     return std::clamp(int(tiles_.size()) - first, 0, kCols);
@@ -331,30 +346,6 @@ void Home::index_to_slot(int index, int *row, int *col) const {
 Rect Home::tile_rect(int row, int col) const {
     float y = row == 0 ? kDockTop : kGridTop + (row - 1) * kRowPitch;
     return {kLeft + col * (kTileW + kGapX), y, kTileW, kTileH};
-}
-
-// --- Inputs ----------------------------------------------------------------
-
-void Home::set_inputs(const std::vector<Input> &inputs) {
-    inputs_ = inputs;
-    inputs_menu_.clear();
-    for (const Input &input : inputs) {
-        Menu::Row row;
-        row.label = render_text(pill_font_, input.label);
-        // The port only when the name doesn't already say it.
-        if (input.label != input.port) row.detail = render_text(label_font_, input.port);
-        row.dot = true;
-        row.dot_color = input.connected ? 0x30d158 : 0x8e8e93;
-        inputs_menu_.rows.push_back(row);
-    }
-    if (inputs.empty()) {
-        // Says so rather than opening nothing; choosing it does nothing.
-        Menu::Row row;
-        row.label = render_text(pill_font_, "No inputs found");
-        inputs_menu_.rows.push_back(row);
-    }
-    int n = int(inputs_menu_.rows.size());
-    inputs_menu_.focus = std::clamp(inputs_menu_.focus, 0, n - 1);
 }
 
 void Home::set_status(const std::string &message) {
@@ -389,7 +380,7 @@ void Home::move_focus(int row, int col, int dx, int dy, bool scroll) {
 
     for (Tile &t : tiles_) t.focus.target = 0;
     if (row != kPill) tiles_[tile_index(row, col)].focus.target = 1;
-    for (int i = 0; i < kPillButtons; i++) pill_focus_[i].target = row == kPill && col == i ? 1 : 0;
+    for (int i = 0; i < Pill::kButtons; i++) pill_focus_[i].target = row == kPill && col == i ? 1 : 0;
 
     if (!scroll) return;
     // The first grid row rises to y 300; later rows keep the focused row in view.
@@ -455,13 +446,6 @@ void Home::press(SDL_Keycode key) {
         }
         return;
     }
-    if (inputs_menu_.open) {
-        if (menu_key(inputs_menu_, key) == MenuResult::kChosen && on_launch &&
-            inputs_menu_.focus < int(inputs_.size())) {
-            on_launch(inputs_[inputs_menu_.focus].app_id);
-        }
-        return;
-    }
     if (moving_) {
         move_key(key);
         return;
@@ -481,19 +465,17 @@ void Home::press(SDL_Keycode key) {
 }
 
 void Home::activate() {
-    if (row_ == kPill && col_ == 2) {
+    if (row_ == kPill && col_ == Pill::kSettings) {
         open_settings();
-    } else if (row_ == kPill && col_ == 1) {
-        if (on_launch) on_launch(kControlCenter);
     } else if (row_ == kPill) {
-        inputs_menu_.show();
-    } else if (on_launch) {
-        on_launch(tiles_[tile_index(row_, col_)].app.id);
+        request(col_ == Pill::kControl ? shell::kOpenPanel : shell::kOpenInputs);
+    } else if (!tiles_.empty()) {
+        launch_app(tiles_[tile_index(row_, col_)].app.id);
     }
 }
 
 void Home::long_press() {
-    if (row_ == kPill || moving_ || tile_menu_.open || inputs_menu_.open || settings_.open || tiles_.empty()) return;
+    if (row_ == kPill || moving_ || tile_menu_.open || settings_.open || tiles_.empty()) return;
     tile_menu_.focus = 0;
     tile_menu_.show();
 }
@@ -561,13 +543,11 @@ void Home::pointer_move(float x, float y) {
     py_ = y;
     if (settings_.open) return menu_pointer(settings_, x, y);
     if (tile_menu_.open) return menu_pointer(tile_menu_, x, y);
-    if (inputs_menu_.open) return menu_pointer(inputs_menu_, x, y);
     if (moving_) return;
     int row, col;
-    int which = -1;
-    for (int i = 0; i < kPillButtons; i++) {
-        if (inside(button_rect_[i], x, y)) which = i;
-    }
+    // The Control Center takes the pointer over the pill (its input region);
+    // this is for when it can't.
+    int which = pill_.hit(x, y);
     if (grid_.x < 0.5f && which >= 0) {
         if (row_ != kPill || col_ != which) move_focus(kPill, which, 0, 0, false);
     } else if (hit_tile(x, y, &row, &col) && (row != row_ || col != col_)) {
@@ -593,7 +573,7 @@ void Home::pointer_up() {
     holding_ = false;
     if (held_long_) return;
     // A click.
-    for (Menu *m : {&settings_, &tile_menu_, &inputs_menu_}) {
+    for (Menu *m : {&settings_, &tile_menu_}) {
         if (!m->open) continue;
         if (inside(m->rect, px_, py_)) press(SDLK_RETURN);
         else m->hide();
@@ -601,13 +581,13 @@ void Home::pointer_up() {
     }
     if (moving_) return press(SDLK_RETURN);  // drop
     int row, col;
-    bool on_button = row_ == kPill && inside(button_rect_[col_], px_, py_);
+    bool on_button = row_ == kPill && pill_.hit(px_, py_) == col_;
     bool on_tile = hit_tile(px_, py_, &row, &col) && row == row_ && col == col_;
     if (on_button || on_tile) activate();
 }
 
 void Home::wheel(int steps) {
-    if (settings_.open || tile_menu_.open || inputs_menu_.open || moving_) {
+    if (settings_.open || tile_menu_.open || moving_) {
         press(steps > 0 ? SDLK_UP : SDLK_DOWN);
         return;
     }
@@ -690,11 +670,6 @@ void Home::draw_menu(Painter &p, Menu &m, float x, float y, float width, float a
         float lit = std::clamp(1 - std::abs(m.highlight.x - float(i)), 0.f, 1.f);
         Color text = {1 - 0.9f * lit, 1 - 0.9f * lit, 1 - 0.88f * lit, 1};
         float tx = panel.x + kMenuPad + 26;
-        if (row.dot) {
-            Rect dot{tx, ry + (kMenuRowH - 12) / 2, 12, 12};
-            p.fill(dot, 6, rgb(row.dot_color), rgb(row.dot_color), a);
-            tx += dot.w + 18;
-        }
         p.text(std::round(tx), std::round(ry + (kMenuRowH - row.label.h) / 2), row.label, text, a);
         float right = panel.x + panel.w - kMenuPad - 26;
         if (row.thumb.id) {
@@ -710,20 +685,85 @@ void Home::draw_menu(Painter &p, Menu &m, float x, float y, float width, float a
     }
 }
 
-// --- Frame -----------------------------------------------------------------
+// --- The Control Center ----------------------------------------------------
 
-void Home::refresh_clock() {
-    std::time_t now = std::time(nullptr);
-    std::tm local;
-    localtime_r(&now, &local);
-    if (local.tm_min == clock_minute_) return;
-    clock_minute_ = local.tm_min;
-    night_.target = night_now() ? 1 : 0;
-    char text[16];
-    std::strftime(text, sizeof text, "%-I:%M %p", &local);
-    destroy(clock_);
-    clock_ = render_text(pill_font_, text);
+void Home::request(shell::Request r) {
+    published_.request = r;
+    published_.request_seq++;
+    published_.request_ms = shell::now_ms();
+    publish();
+    // It picks the request up within a frame or two; if it isn't running,
+    // launching it starts it, and it reads the request as it starts.
+    if (shell::now_ms() - shared_.control().alive_ms > kControlAlive && on_launch) on_launch(kControlCenter, "");
 }
+
+void Home::launch_app(const std::string &app_id) {
+    // The pill (the Control Center's window) would otherwise linger over the
+    // new app until the foreground changes; it goes now.
+    leaving_until_ = shell::now_ms() + kLeavingTime;
+    leaving_written_ = foreground_written();
+    publish();
+    if (on_launch) on_launch(app_id, "");
+}
+
+bool Home::front() {
+    long long written = foreground_written();
+    if (written != foreground_written_) {
+        foreground_written_ = written;
+        std::ifstream f(kForeground);
+        std::string id;
+        std::getline(f, id);
+        // No file yet (tv/settings-key starts after Home at boot): Home is the first app.
+        foreground_home_ = !written || id == kHomeId;
+    }
+    if (leaving_until_ && (written != leaving_written_ || shell::now_ms() > leaving_until_)) leaving_until_ = 0;
+    return foreground_home_ && !leaving_until_;
+}
+
+void Home::watch_control() {
+    shell::ControlState c = shared_.control();
+    if (c.request_seq != control_seq_) {
+        control_seq_ = c.request_seq;
+        if (c.request == shell::kOpenHomeSettings && !settings_.open) {
+            tile_menu_.hide();
+            move_focus(kPill, Pill::kSettings, 0, 0, false);
+            open_settings();
+        } else if (c.request == shell::kFocusPill && c.request_arg >= 0 && c.request_arg < Pill::kButtons) {
+            // Where focus was in the pill when the Control Center closed.
+            move_focus(kPill, c.request_arg, 0, 0, false);
+        }
+    }
+    // Its pointer coming onto a pill button moves focus there, as Home's own would.
+    if (c.pointer_seq != control_pointer_seq_) {
+        control_pointer_seq_ = c.pointer_seq;
+        bool menus = tile_menu_.open || settings_.open || moving_;
+        if (c.pointer_button >= 0 && c.pointer_button < Pill::kButtons && !menus && grid_.x < 0.5f) {
+            pointer_ = true;
+            move_focus(kPill, c.pointer_button, 0, 0, false);
+        }
+    }
+    // Keep it loaded: it draws the pill.
+    uint64_t now = shell::now_ms();
+    if (shared_.is_open() && now - c.alive_ms > kControlAlive && now - preloaded_ms_ > kPreloadInterval &&
+        published_.front && on_launch) {
+        LOG("home: the Control Center isn't running; loading it");
+        preloaded_ms_ = now;
+        // A launch reaching a copy that is running after all must not open it.
+        published_.preload_ms = now;
+        publish();
+        on_launch(kControlCenter, R"({"hidden":true})");
+    }
+}
+
+void Home::publish() {
+    published_.alive_ms = shell::now_ms();
+    published_.front = front();
+    published_.pill_alpha = 1 - std::clamp(grid_.x, 0.f, 1.f);
+    for (int i = 0; i < Pill::kButtons; i++) published_.pill_focus[i] = pill_focus_[i].x;
+    shared_.set_home(published_);
+}
+
+// --- Frame -----------------------------------------------------------------
 
 void Home::update(float dt) {
     time_ += dt;
@@ -755,7 +795,7 @@ void Home::update(float dt) {
 
         // While the pointer rests on the focused tile, it leans toward it.
         float lx = 0, ly = 0;
-        bool menus = tile_menu_.open || inputs_menu_.open || settings_.open;
+        bool menus = tile_menu_.open || settings_.open;
         if (pointer_ && !menus && !moving_ && row == row_ && col == col_) {
             Rect r = slot;
             r.y -= scroll_.x;
@@ -771,7 +811,7 @@ void Home::update(float dt) {
         t.lean_y.step(dt, kLeanStiffness, kLeanDamping);
     }
     for (Spring &s : pill_focus_) s.step(dt, kFocusStiffness, kFocusDamping);
-    for (Menu *m : {&inputs_menu_, &tile_menu_, &settings_}) {
+    for (Menu *m : {&tile_menu_, &settings_}) {
         m->anim.step(dt, kFocusStiffness, kFocusDamping);
         m->highlight.step(dt, kFocusStiffness, kFocusDamping);
     }
@@ -779,7 +819,9 @@ void Home::update(float dt) {
     night_.step(dt, kScrollStiffness * 0.3f, kScrollDamping * 0.6f);  // a slow fade
     scroll_.step(dt, kScrollStiffness, kScrollDamping);
     grid_.step(dt, kScrollStiffness, kScrollDamping);
-    refresh_clock();
+    if (pill_.refresh_clock()) night_.target = night_now() ? 1 : 0;
+    watch_control();
+    publish();
 }
 
 void Home::draw_tile(Painter &p, int index) {
@@ -867,49 +909,14 @@ void Home::render(Painter &p) {
                rgb(0xffffff), 1 - g);
     }
 
-    // Status pill: clock, the Inputs button, the Control Center and the
-    // settings button, fading out in the grid.
-    float alpha = 1 - g;
-    float pad = 26, gap = 22, height = 64, bh = height - 12;
-    Rect inputs_button{0, 0, inputs_label_.w + 2 * pad, bh}, control_button{0, 0, bh, bh}, gear_button{0, 0, bh, bh};
-    float width = pad + clock_.w + gap + inputs_button.w + 6 + control_button.w + 6 + gear_button.w + 6;
-    Rect pill{1920 - kLeft + kDockPad - width, 64, width, height};
-    gear_button.x = pill.x + pill.w - gear_button.w - 6;
-    control_button.x = gear_button.x - 6 - control_button.w;
-    inputs_button.x = control_button.x - 6 - inputs_button.w;
-    gear_button.y = control_button.y = inputs_button.y = pill.y + 6;
-    // Darker glass than the dock: the top of a photo is often bright sky or sand.
-    p.glass(pill, height / 2, rgb(0x0b1016, 0.38f), alpha);
-    p.text(std::round(pill.x + pad), std::round(pill.y + (height - clock_.h) / 2), clock_, rgb(0xffffff), alpha);
-
-    Texture glyphs[kPillButtons] = {{}, icons_.get(assets_ + "/icons/control.png"),
-                                    icons_.get(assets_ + "/icons/settings.png")};
-    Rect buttons[kPillButtons] = {inputs_button, control_button, gear_button};
-    for (int i = 0; i < kPillButtons; i++) {
-        button_rect_[i] = buttons[i];
-        float pf = std::max(0.f, pill_focus_[i].x);
-        Rect b = buttons[i].scaled(1 + 0.08f * pf);
-        if (pf > 0.01f) p.shadow(b, b.h / 2, 18, rgb(0x000000, 0.4f), pf * alpha);
-        p.fill(b, b.h / 2, rgb(0xffffff, 0.10f + 0.90f * pf), rgb(0xffffff, 0.10f + 0.90f * pf), alpha);
-        // White on glass, dark on the focused button.
-        Color ink = {1 - 0.9f * pf, 1 - 0.9f * pf, 1 - 0.88f * pf, 1};
-        if (i == 0) {
-            p.text(std::round(b.x + (b.w - inputs_label_.w) / 2), std::round(b.y + (b.h - inputs_label_.h) / 2),
-                   inputs_label_, ink, alpha);
-        } else if (glyphs[i].id) {
-            p.image(b.inset(b.w * 0.2f), 0, glyphs[i], ink, alpha);
-        }
-    }
-
     // Menus over everything, with the screen dimmed behind them.
-    float dim = std::max({std::clamp(inputs_menu_.anim.x, 0.f, 1.f), std::clamp(tile_menu_.anim.x, 0.f, 1.f),
-                          std::clamp(settings_.anim.x, 0.f, 1.f)});
+    // (The pill is the Control Center's, above this window: it isn't dimmed.)
+    float dim = std::max(std::clamp(tile_menu_.anim.x, 0.f, 1.f), std::clamp(settings_.anim.x, 0.f, 1.f));
     if (dim > 0.01f) {
         p.fill(screen, 0, rgb(0x000000, 0.30f), rgb(0x000000, 0.30f), dim);
         // The tile being edited stays bright above the dimming.
         if (tile_menu_.anim.x > 0.01f && focused >= 0) draw_tile(p, focused);
     }
-    draw_menu(p, inputs_menu_, pill.x + pill.w - kInputsW, pill.y + pill.h + 14, kInputsW, 1);
     if (focused >= 0) {
         // Below the tile, or above it when there's no room.
         Rect t{tiles_[focused].x.x, tiles_[focused].y.x - scroll_.x, kTileW, kTileH};
@@ -920,6 +927,7 @@ void Home::render(Painter &p) {
         if (my + mh > h_ - 20) my = t.y - 28 - mh;
         draw_menu(p, tile_menu_, t.x, my, kTileMenuW, 1);
     }
-    // Drops from the corner, like Inputs.
+    // Drops from the pill's corner, like Inputs and the Control Center.
+    Rect pill = pill_.rect();
     draw_menu(p, settings_, pill.x + pill.w - kSettingsW, pill.y + pill.h + 14, kSettingsW, 1);
 }

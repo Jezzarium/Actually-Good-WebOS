@@ -3,11 +3,14 @@
 # by inserting /var/lib/lgtv-tweaks/settingskey.js into surface-manager's key
 # filter list, just before LG's handleHotkeys. configd keeps setConfigs changes
 # only until reboot, so this re-applies it at boot.
-# It also keeps the Control Center loaded, hidden: the app asks to survive app
-# switches, but should it be closed anyway, after a foreground change it is
-# reloaded with {"hidden": true} if it isn't running, so the next Settings
-# press only has to show it. And it writes the foreground app's id to
-# /tmp/lgtv-control.foreground, so the panel knows whether it is over Home and
+# It also keeps the Control Center loaded, hidden: it loads it at boot (the
+# TV may boot into an input rather than Home, and the Settings key must be
+# instant there too), and the app asks to survive app switches, but should it
+# be closed anyway, after a foreground change it is reloaded with
+# {"hidden": true} if it isn't running, so the next Settings press only has to
+# show it. (Home also reloads it while Home is in front: it draws Home's pill.)
+# And it writes the foreground app's id to /tmp/lgtv-control.foreground, so
+# the Control Center knows whether it is over Home (its pill and glass) and
 # closes when the app changes.
 # Installed to /var/lib/webosbrew/init.d/. Undo: rm this script and reboot, or
 # setConfigs with the saved original list (tv/keyFilters_before.json in the repo).
@@ -65,8 +68,7 @@ preload() {
         insert_handler && break
         sleep 5
     done
-    # Let the boot-time app launches settle before loading ours in the background.
-    [ -n "$NO_BOOT_WAIT" ] || sleep 30
+    # The native app starts in well under a second; no need to wait for boot to settle.
     preload
     while :; do
         # extraInfo: overlays too, such as LG's settings opening over an app.

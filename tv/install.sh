@@ -107,11 +107,10 @@ if [ -n "$new" ]; then luna luna://com.webos.service.config/setConfigs "$new"; e
 step "starting the boot scripts"
 # Stop a copy already running (with its children: its luna-send subscription and
 # the loop reading it), so an update takes effect. NO_BOOT_OPEN: the TV is in
-# use, so default-home only keeps LG Home out of memory instead of opening Home;
-# NO_BOOT_WAIT: settings-key loads the Control Center now, not after boot settles.
+# use, so default-home only keeps LG Home out of memory instead of opening Home.
 for s in $scripts; do
     tv "$KILLTREE; [ -f /tmp/$s.pid ] && killtree \$(cat /tmp/$s.pid) 2>/dev/null; rm -f /tmp/$s.pid
-        NO_BOOT_OPEN=1 NO_BOOT_WAIT=1 /var/lib/webosbrew/init.d/$s </dev/null >/dev/null 2>&1"
+        NO_BOOT_OPEN=1 /var/lib/webosbrew/init.d/$s </dev/null >/dev/null 2>&1"
 done
 luna luna://com.webos.applicationManager/launch "{\"id\":\"$HOME_ID\"}"
 echo

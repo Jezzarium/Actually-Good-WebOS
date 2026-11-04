@@ -1,10 +1,13 @@
 # Code shared by the native apps (home/, control/): drawing, the Luna bus,
-# logging and springs. include() it after the SDL2, SDL2_ttf, json-c and GLES2
-# imported targets exist.
+# logging, springs, the status pill, inputs and the state the two apps share.
+# include() it after the SDL2, SDL2_ttf, json-c and GLES2 imported targets exist.
 set(LGTV_COMMON_DIR ${CMAKE_CURRENT_LIST_DIR})
 add_library(lgtv_common STATIC
   ${LGTV_COMMON_DIR}/gfx.cpp
+  ${LGTV_COMMON_DIR}/inputs.cpp
   ${LGTV_COMMON_DIR}/luna.cpp
+  ${LGTV_COMMON_DIR}/pill.cpp
+  ${LGTV_COMMON_DIR}/shell_state.cpp
 )
 target_include_directories(lgtv_common PUBLIC ${LGTV_COMMON_DIR})
 target_compile_options(lgtv_common PRIVATE -Wall -Wextra)

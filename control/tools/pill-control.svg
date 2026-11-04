@@ -1,5 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#fff">
-  <!-- Two switches, the Control Center's glyph: filled like settings.png's gear. -->
+  <!-- Two switches, the pill's Control Center glyph: filled like pill-settings.png's gear.
+       rsvg-convert -w 192 -h 192 tools/pill-control.svg -o assets/icons/pill-control.png -->
   <path fill-rule="evenodd" d="M7 3h10a4 4 0 0 1 0 8H7a4 4 0 0 1 0-8zm10 1.8a2.2 2.2 0 1 0 0 4.4 2.2 2.2 0 0 0 0-4.4z"/>
   <path fill-rule="evenodd" d="M7 13h10a4 4 0 0 1 0 8H7a4 4 0 0 1 0-8zm0 1.8a2.2 2.2 0 1 0 0 4.4 2.2 2.2 0 0 0 0-4.4z"/>
 </svg>

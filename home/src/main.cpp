@@ -182,15 +182,11 @@ int main(int argc, char **argv) {
                            }
                        });
 
-        luna.subscribe("luna://com.webos.service.eim/getAllInputStatus", R"({"subscribe":true})",
-                       [&home](json_object *reply) {
-                           std::vector<Input> inputs = inputs_from_status(reply);
-                           if (!inputs.empty()) home.set_inputs(inputs);
-                       });
-        home.on_launch = [&luna](const std::string &id) {
-            LOG("home: launch %s", id.c_str());
+        home.on_launch = [&luna](const std::string &id, const std::string &app_params) {
+            LOG("home: launch %s %s", id.c_str(), app_params.c_str());
             json_object *params = json_object_new_object();
             json_object_object_add(params, "id", json_object_new_string(id.c_str()));
+            if (!app_params.empty()) json_object_object_add(params, "params", json_tokener_parse(app_params.c_str()));
             luna.call(std::string(kAppManager) + "launch", json_object_to_json_string(params),
                       [id](json_object *reply) {
                           if (!get_bool(reply, "returnValue")) {

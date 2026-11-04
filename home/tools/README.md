@@ -4,7 +4,7 @@
 afterwards, so the home screen can be tested from this machine:
 
 ```sh
-tools/key.sh UP ENTER                 # open the Inputs panel
+tools/key.sh UP ENTER                 # open the Inputs menu (drawn by the Control Center)
 tools/key.sh -c /tmp/cap.png DOWN     # move into the grid, then save a screenshot
 ```
 
@@ -16,5 +16,4 @@ tools/record.sh RIGHT RIGHT DOWN 1.5 UP     # a number pauses that many seconds
 tools/record.sh -t 10 -o demo.gif           # 10 s of you driving the remote
 ```
 
-`control-icon.svg` is the source of `assets/icons/control.png`, the pill's Control Center
-glyph: `rsvg-convert -w 192 -h 192 tools/control-icon.svg -o assets/icons/control.png`.
+`install.sh` installs the newest package in `build/` and waits until it is installed.
