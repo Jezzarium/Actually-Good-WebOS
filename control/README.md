@@ -20,8 +20,8 @@ tools/           install.sh (quick install), shot.sh (keys + screenshot), latenc
 ## Hooks into LG's SDL
 
 LG's SDL (the webOS port of 2.0.14 that ships on the TV) has no API for an overlay window, for
-hiding one, or for noticing a relaunch. `src/overlay.cpp` reaches into the library's private
-data for these, at offsets found by disassembling the copy on an LG OLED65C5PUA running
+hiding one, or for noticing a relaunch. `src/overlay.cpp` and `common/lg_sdl.cpp` (window
+properties, which Home also uses) reach into the library's private data for these, at offsets found by disassembling the copy on an LG OLED65C5PUA running
 webOS 10.3.1:
 
 | What | Where | Why |
@@ -38,7 +38,7 @@ the bytes they have in this build, checks that the shell surface really is a
 `libSDL2`. If anything differs it logs why and runs as an ordinary full-screen window that
 quits when closed: the settings still work, but not over the picture. Updating it for a new
 build means disassembling those two functions in that copy of `/usr/lib/libSDL2-2.0.so.0`
-and changing the offsets and bytes in `overlay.cpp`.
+and changing the offsets and bytes in `overlay.cpp` and `common/lg_sdl.cpp`.
 
 ## The pill and Home
 

@@ -48,6 +48,11 @@ artwork that changes with the focused app.
   **Hide**. A moving tile wiggles and the arrows carry it while the others slide aside.
 - **Home Settings:** wallpaper (Left/Right, previewed live with a thumbnail), appearance, show
   hidden apps, reset layout.
+- **Opening and closing apps:** the tile zooms to full screen as its app opens, and the app
+  shrinks back into it on the Home key, on springs like Apple's. Drawn inside LG's compositor by
+  `tv/Transitions.qml`; Home only says where the tile is and how it looks, in the window property
+  `lgtvLaunch` (`Home::tile_json`), set just before the launch (see the root README, "App
+  transitions").
 
 ### Why a still wallpaper is cheap
 

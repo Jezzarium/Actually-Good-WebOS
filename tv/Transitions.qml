@@ -53,8 +53,36 @@ Item {
     property string snappedApp: ""
     property bool useSnapshot: false
 
+    // Motion as in Apple's interfaces: springs, set by a damping ratio and a
+    // response (the period of the undamped spring, in seconds), as Apple
+    // describes them ("Designing Fluid Interfaces", WWDC 2018). They start
+    // softly, move fast, and take a long, gentle time to settle, where a
+    // fixed easing curve reads as mechanical. Closing lands with a hint of
+    // bounce, as an app does going back into its icon on iOS.
+    readonly property real openDamping: 0.9
+    readonly property real openResponse: 0.5
+    readonly property real closeDamping: 0.85
+    readonly property real closeResponse: 0.55
+
+    // How far a spring from rest has gone toward its target (0..1, past 1 on
+    // overshoot), after time seconds.
+    function spring(time, damping, response) {
+        var w = 2 * Math.PI / response, decay = damping * w;
+        var wd = w * Math.sqrt(1 - damping * damping);
+        return 1 - Math.exp(-decay * time) * (Math.cos(wd * time) + decay / wd * Math.sin(wd * time));
+    }
+    // When it is within a few pixels of the target over the screen's width.
+    function settleTime(damping, response) {
+        var w = 2 * Math.PI / response;
+        return Math.log(1 / (0.003 * Math.sqrt(1 - damping * damping))) / (damping * w);
+    }
+
+    // Seconds into the open or close spring.
+    property real elapsed: 0
+    property bool closing: false
     // 0: the tile where Home draws it, 1: full screen.
-    property real t: 0
+    readonly property real t: closing ? 1 - spring(elapsed, closeDamping, closeResponse)
+                                      : spring(elapsed, openDamping, openResponse)
 
     Component.onCompleted: {
         for (var i = 0; i < below.length; i++) {
@@ -177,7 +205,8 @@ Item {
         homeShot.sourceItem = home;
         homeShot.scheduleUpdate();
         homeShot.visible = true;
-        t = 0;
+        closing = false;
+        elapsed = 0;
         card.opacity = 1;
         card.visible = true;
         expand.start();
@@ -210,7 +239,8 @@ Item {
             reset();
             return;
         }
-        t = 1;
+        closing = true;
+        elapsed = 0;
         card.visible = true;
         // The tile's art, unlike the picture, isn't what was on screen: it
         // fades in as it starts to shrink.
@@ -240,13 +270,15 @@ Item {
         if (!snapped) snapshot.sourceItem = null;
     }
 
+    // The springs run on their own clock: elapsed goes up steadily, t follows
+    // the curve.
     NumberAnimation {
         id: expand
         target: root
-        property: "t"
-        to: 1
-        duration: 400
-        easing.type: Easing.OutCubic
+        property: "elapsed"
+        from: 0
+        to: settleTime(openDamping, openResponse)
+        duration: to * 1000
         onFinished: {
             root.expanded = true;
             homeShot.visible = false;
@@ -258,16 +290,17 @@ Item {
         target: card
         property: "opacity"
         to: 0
-        duration: 220
+        duration: 250
+        easing.type: Easing.InOutQuad
         onFinished: root.reset()
     }
     NumberAnimation {
         id: shrink
         target: root
-        property: "t"
-        to: 0
-        duration: 450
-        easing.type: Easing.OutCubic
+        property: "elapsed"
+        from: 0
+        to: settleTime(closeDamping, closeResponse)
+        duration: to * 1000
         onFinished: land.start()
     }
     NumberAnimation {
@@ -276,6 +309,7 @@ Item {
         property: "opacity"
         to: 1
         duration: 150
+        easing.type: Easing.OutQuad
     }
     // On the tile, which looks the same underneath.
     NumberAnimation {
@@ -283,7 +317,8 @@ Item {
         target: card
         property: "opacity"
         to: 0
-        duration: 120
+        duration: 150
+        easing.type: Easing.InOutQuad
         onFinished: root.reset()
     }
     // After its surface opens, the app's first new frame, or this long.
@@ -356,7 +391,7 @@ Item {
         readonly property real iconH: root.tile ? root.tile.ih * iconScale : 0
 
         property size cardSize: Qt.size(width, height)
-        property real radius: root.tile ? root.tile.r * (1 - root.t) : 0
+        property real radius: root.tile ? root.tile.r * Math.max(0, 1 - root.t) : 0
         property color topColor: root.tile ? root.tile.top : "black"
         property color bottomColor: root.tile ? root.tile.bottom : "black"
         property variant iconTexture: icon
@@ -369,7 +404,7 @@ Item {
                                   ? Qt.point(width / height * root.height / root.width, 1)
                                   : Qt.point(1, height / width * root.width / root.height)
         // The picture until the last stretch, then the tile.
-        property real snapMix: root.useSnapshot ? Math.max(0, Math.min(1, (root.t - 0.02) / 0.3)) : 0
+        property real snapMix: root.useSnapshot ? Math.max(0, Math.min(1, (root.t - 0.01) / 0.15)) : 0
 
         Behavior on iconShown { NumberAnimation { duration: 150 } }
 

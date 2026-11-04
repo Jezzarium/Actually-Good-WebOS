@@ -1,7 +1,8 @@
 # Plan: one pill everywhere, and tvOS-style app transitions
 
 Status: Part 1 implemented (branch `control-center`, 2026-11-03), except the pointer check with
-a real Magic Remote (step 1.1); see "Part 1 as built". Part 2 planned.
+a real Magic Remote (step 1.1); see "Part 1 as built". Part 2 implemented (branch `transitions`,
+2026-11-03), except the Back-out shrink, which LG never lets happen; see "Part 2 as built".
 
 Two pieces of work that share one idea: our apps (Home, the Control Center, and a script inside
 LG's compositor) tell each other what they are doing, so each thing on screen is drawn by exactly
@@ -346,6 +347,35 @@ video window manager reports video, skip the snapshot and use tile art.
 5. Closing zoom with snapshot (Home key), tile-art fallback (Back, video), Back pre-snapshot.
 6. Install/uninstall wiring; docs (root `README.md` TV scripts table, a new section in
    `home/PLAN.md`).
+
+### Part 2 as built
+
+Where it differs from the above (the README's "App transitions" describes what is there):
+
+- **No `lgtvTiles`.** Home publishes only `lgtvLaunch`, the tile of the app last opened from it,
+  again whenever that tile moves. That covers going Home from it (Home doesn't scroll while
+  hidden), and a list of every tile could pass Wayland's 4 KB message limit.
+- **Springs, not easing curves.** Position, size, corner radius and icon size all follow one
+  spring (damping ratio and response, as in Apple's "Designing Fluid Interfaces"): opening 0.9 /
+  0.5 s, closing 0.85 / 0.55 s, so it lands with a slight bounce. Opacity fades stay short eases.
+- **Home behind the zoom is a snapshot.** LG hides Home as soon as the app's window opens, often
+  within 100 ms, so the tile grew over black; Home is captured as the tile is chosen and drawn
+  under it until it fills the screen.
+- **First frame:** the app's surface `redraw` signal (QWaylandSurface) after `surfaceOpened`,
+  or 100 ms, whichever comes first.
+- **Snapshots on OK too:** apps ask "exit the app?" and quit on OK. But an app that quits opens
+  LG Home, not ours (README, Known issues), so the Back path can't be seen yet.
+- **Stacking:** `stackAfter` isn't callable from QML, so LG's fullscreen view and the views it
+  stacks just above it (splash, spinners, HCAP, floating, boot popup) go to `z: -1` and the layer
+  sits at `-0.5`; they go back to 0 when it stops.
+- **Lifetime:** the layer keeps a guarded reference to the key filter's loader object and stops
+  when surface-manager drops it (any change to the list, or uninstall). Calling `destroy()` from
+  that moment never completes, so it stays, empty, until the next load replaces it or a reboot.
+- **Video:** `foregroundVideoWindowMgr.getForegroundVideoWindow()` on the fullscreen container
+  lists the app while it plays video (tested with YouTube).
+- **Debugging:** surface-manager's console doesn't reach any log. A throwaway key filter that
+  `eval`s a root-owned file on a timer and sends results as a Luna call watched with
+  `ls-monitor -f com.webos.starfish.keyfilters` worked as a REPL; don't ship it.
 
 ### Checks
 
