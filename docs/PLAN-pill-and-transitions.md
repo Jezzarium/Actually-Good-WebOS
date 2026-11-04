@@ -355,9 +355,9 @@ Where it differs from the above (the README's "App transitions" describes what i
 - **No `lgtvTiles`.** Home publishes only `lgtvLaunch`, the tile of the app last opened from it,
   again whenever that tile moves. That covers going Home from it (Home doesn't scroll while
   hidden), and a list of every tile could pass Wayland's 4 KB message limit.
-- **Springs, not easing curves.** Position, size, corner radius and icon size all follow one
-  spring (damping ratio and response, as in Apple's "Designing Fluid Interfaces"): opening 0.9 /
-  0.5 s, closing 0.85 / 0.55 s, so it lands with a slight bounce. Opacity fades stay short eases.
+- **Springs, not easing curves.** Size (with corner radius and icon size) and position each follow
+  a spring (damping ratio and response, as in Apple's "Designing Fluid Interfaces"), so the card travels on a curve; responses 0.3–0.42 s, settling in about half a second. See the top of
+  `Transitions.qml`. Closing lands with a slight bounce. Opacity fades stay short eases.
 - **Home behind the zoom is a snapshot.** LG hides Home as soon as the app's window opens, often
   within 100 ms, so the tile grew over black; Home is captured as the tile is chosen and drawn
   under it until it fills the screen.

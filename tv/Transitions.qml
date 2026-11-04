@@ -57,12 +57,19 @@ Item {
     // response (the period of the undamped spring, in seconds), as Apple
     // describes them ("Designing Fluid Interfaces", WWDC 2018). They start
     // softly, move fast, and take a long, gentle time to settle, where a
-    // fixed easing curve reads as mechanical. Closing lands with a hint of
-    // bounce, as an app does going back into its icon on iOS.
-    readonly property real openDamping: 0.9
-    readonly property real openResponse: 0.5
-    readonly property real closeDamping: 0.85
-    readonly property real closeResponse: 0.55
+    // fixed easing curve reads as mechanical. As on iOS, where the card is
+    // and how big it is have springs of their own, so it travels on a curve:
+    // closing, it shrinks first and then swoops down into its tile (landing
+    // with a hint of bounce); opening, it rises first and then fills the
+    // screen. Responses are short, for snap.
+    readonly property real openMoveDamping: 0.9
+    readonly property real openMoveResponse: 0.3
+    readonly property real openGrowDamping: 0.86
+    readonly property real openGrowResponse: 0.4
+    readonly property real closeMoveDamping: 0.8
+    readonly property real closeMoveResponse: 0.42
+    readonly property real closeGrowDamping: 0.86
+    readonly property real closeGrowResponse: 0.3
 
     // How far a spring from rest has gone toward its target (0..1, past 1 on
     // overshoot), after time seconds.
@@ -80,9 +87,12 @@ Item {
     // Seconds into the open or close spring.
     property real elapsed: 0
     property bool closing: false
-    // 0: the tile where Home draws it, 1: full screen.
-    readonly property real t: closing ? 1 - spring(elapsed, closeDamping, closeResponse)
-                                      : spring(elapsed, openDamping, openResponse)
+    // 0: the tile where Home draws it, 1: full screen. t is the size (and
+    // what follows it: corners, icon, highlight); move is the centre.
+    readonly property real t: closing ? 1 - spring(elapsed, closeGrowDamping, closeGrowResponse)
+                                      : spring(elapsed, openGrowDamping, openGrowResponse)
+    readonly property real move: closing ? 1 - spring(elapsed, closeMoveDamping, closeMoveResponse)
+                                         : spring(elapsed, openMoveDamping, openMoveResponse)
 
     Component.onCompleted: {
         for (var i = 0; i < below.length; i++) {
@@ -287,7 +297,7 @@ Item {
         target: root
         property: "elapsed"
         from: 0
-        to: settleTime(openDamping, openResponse)
+        to: Math.max(settleTime(openMoveDamping, openMoveResponse), settleTime(openGrowDamping, openGrowResponse))
         duration: to * 1000
         onFinished: {
             root.expanded = true;
@@ -309,7 +319,7 @@ Item {
         target: root
         property: "elapsed"
         from: 0
-        to: settleTime(closeDamping, closeResponse)
+        to: Math.max(settleTime(closeMoveDamping, closeMoveResponse), settleTime(closeGrowDamping, closeGrowResponse))
         duration: to * 1000
         onFinished: land.start()
     }
@@ -397,10 +407,10 @@ Item {
     ShaderEffect {
         id: card
         visible: false
-        x: root.tile ? root.tile.x * (1 - root.t) : 0
-        y: root.tile ? root.tile.y * (1 - root.t) : 0
         width: root.tile ? root.tile.w + (root.width - root.tile.w) * root.t : root.width
         height: root.tile ? root.tile.h + (root.height - root.tile.h) * root.t : root.height
+        x: root.tile ? (root.tile.x + root.tile.w / 2) * (1 - root.move) + root.width / 2 * root.move - width / 2 : 0
+        y: root.tile ? (root.tile.y + root.tile.h / 2) * (1 - root.move) + root.height / 2 * root.move - height / 2 : 0
 
         // The icon grows less than the tile: 2.5 times at full screen.
         readonly property real iconScale: 1 + 1.5 * root.t
