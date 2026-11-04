@@ -358,6 +358,10 @@ Where it differs from the above (the README's "App transitions" describes what i
 - **Springs, not easing curves.** Size (with corner radius and icon size) and position each follow
   a spring (damping ratio and response, as in Apple's "Designing Fluid Interfaces"), so the card travels on a curve; responses 0.3–0.42 s, settling in about half a second. See the top of
   `Transitions.qml`. Closing lands with a slight bounce. Opacity fades stay short eases.
+- **Home leaves the tile out** while the card is drawn over it, so there aren't two: on a launch,
+  for one frame before it publishes `lgtvLaunch` (so the snapshot of Home under the zoom doesn't
+  have it) and launches, and for 0.5 s when it gets the remote back (`SDL_WINDOWEVENT_FOCUS_GAINED`)
+  with the foreground file still naming that app, until the shrinking card is on the tile.
 - **Home behind the zoom is a snapshot.** LG hides Home as soon as the app's window opens, often
   within 100 ms, so the tile grew over black; Home is captured as the tile is chosen and drawn
   under it until it fills the screen.

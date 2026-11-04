@@ -235,6 +235,7 @@ int main(int argc, char **argv) {
                 if (e.type == SDL_KEYDOWN) home.key_down(key, e.key.repeat);
                 else home.key_up(key);
             }
+            if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) home.focus_gained();
             if (e.type == SDL_MOUSEMOTION) home.pointer_move(float(e.motion.x), float(e.motion.y));
             if ((e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP) && e.button.button == SDL_BUTTON_LEFT) {
                 home.pointer_move(float(e.button.x), float(e.button.y));
