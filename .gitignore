@@ -8,5 +8,5 @@ preview/_*.html
 # Personal TV dumps and retired files (postal code, network logs)
 tv/local/
 
-# Python bytecode (home/build.py imports settings/build.py)
+# Python bytecode (the build scripts import common/native_build.py)
 __pycache__/

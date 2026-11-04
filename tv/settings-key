@@ -1,17 +1,31 @@
 #!/bin/sh
-# Route the remote's Settings key to Quick Settings (com.lgtvtweaks.settings) by
-# inserting /var/lib/lgtv-tweaks/settingskey.js into surface-manager's key filter
-# list, just before LG's handleHotkeys. configd keeps setConfigs changes only
-# until reboot, so this re-applies it at boot. It also preloads the app hidden,
-# so the first press only has to show an already-loaded page.
+# Route the remote's Settings key to the Control Center (com.lgtvtweaks.control)
+# by inserting /var/lib/lgtv-tweaks/settingskey.js into surface-manager's key
+# filter list, just before LG's handleHotkeys. configd keeps setConfigs changes
+# only until reboot, so this re-applies it at boot.
+# It also keeps the Control Center loaded, hidden: it loads it at boot (the
+# TV may boot into an input rather than Home, and the Settings key must be
+# instant there too), and the app asks to survive app switches, but should it
+# be closed anyway, after a foreground change it is reloaded with
+# {"hidden": true} if it isn't running, so the next Settings press only has to
+# show it. (Home also reloads it while Home is in front: it draws Home's pill.)
+# And it writes the foreground app's id to /tmp/lgtv-control.foreground, so
+# the Control Center knows whether it is over Home (its pill and glass) and
+# closes when the app changes.
 # Installed to /var/lib/webosbrew/init.d/. Undo: rm this script and reboot, or
 # setConfigs with the saved original list (tv/keyFilters_before.json in the repo).
 
-APP=com.lgtvtweaks.settings
+APP=com.lgtvtweaks.control
 HANDLER=/var/lib/lgtv-tweaks/settingskey.js
 NAME=com.webos.surfacemanager.keyFilters
+PIDFILE=/tmp/settings-key.pid
+# The app ignores a relaunch that comes this soon after the marker (one that
+# reaches a copy still running), so a reload can never open it.
+MARKER=/tmp/lgtv-control.preload
+FOREGROUND=/tmp/lgtv-control.foreground
 
 [ -f "$HANDLER" ] || exit 0
+[ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null && exit 0
 
 insert_handler() {
     cur=$(luna-send -n 1 luna://com.webos.service.config/getConfigs \
@@ -28,14 +42,45 @@ insert_handler() {
     return 1
 }
 
+preload() {
+    luna-send -n 1 luna://com.webos.applicationManager/running '{}' </dev/null 2>/dev/null |
+        grep -q "\"id\":\"$APP\"" && return 0
+    touch "$MARKER"
+    luna-send -n 1 luna://com.webos.applicationManager/launch \
+        "{\"id\":\"$APP\",\"params\":{\"hidden\":true}}" </dev/null >/dev/null 2>&1
+}
+
 (
+    # The app in front (overlays not counted), for the Control Center: it
+    # matches Home's wallpaper over Home and is plain dark glass over the rest,
+    # and it closes when this changes.
+    while :; do
+        luna-send -i luna://com.webos.applicationManager/getForegroundAppInfo '{"subscribe":true}' \
+            </dev/null 2>/dev/null |
+        while read -r line; do
+            id=$(printf '%s' "$line" | sed -n 's/.*"appId":"\([^"]*\)".*/\1/p')
+            [ -n "$id" ] && echo "$id" > "$FOREGROUND.tmp" && mv "$FOREGROUND.tmp" "$FOREGROUND"
+        done
+        sleep 5
+    done &
     # configd may not be up yet; retry for ~2 minutes.
     for i in $(seq 1 24); do
         insert_handler && break
         sleep 5
     done
-    # Let the boot-time app launches settle before loading ours in the background.
-    sleep 30
-    luna-send -n 1 luna://com.webos.applicationManager/launch \
-        "{\"id\":\"$APP\",\"preload\":\"full\",\"keepAlive\":true}" </dev/null >/dev/null 2>&1
+    # The native app starts in well under a second; no need to wait for boot to settle.
+    preload
+    while :; do
+        # extraInfo: overlays too, such as LG's settings opening over an app.
+        luna-send -i luna://com.webos.applicationManager/getForegroundAppInfo '{"subscribe":true,"extraInfo":true}' \
+            </dev/null 2>/dev/null |
+        while read -r line; do
+            case "$line" in *'"appId"'*) ;; *) continue ;; esac
+            # Give a Control Center being closed by the switch time to go.
+            sleep 3
+            preload
+        done
+        sleep 5
+    done
 ) </dev/null >/dev/null 2>&1 &
+echo $! > "$PIDFILE"
