@@ -365,8 +365,10 @@ Where it differs from the above (the README's "App transitions" describes what i
   opens, and the card grows faster than it moves, so it covers the tile meanwhile. Going Home,
   it leaves the tile out for 0.7 s after it gets the remote back
   (`SDL_WINDOWEVENT_FOCUS_GAINED`) with the foreground file still naming that app, then draws it
-  and sets `lgtvTileBack`; the card, waiting on the tile, goes in that same frame (or fades after
-  0.4 s without word).
+  and sets `lgtvTileBack`. The property arrives frames before that frame is on screen, so from
+  then the card and its shadow watch a 2 px live ShaderEffectSource of the tile's slot (left edge,
+  half way down) and draw nothing once it has the tile's colour: they vanish in the exact frame
+  Home's tile appears (checked: identical to Home alone). Without word or match, a fade at 0.4 s.
 - **Frame-paced springs:** a clock drives the springs but they advance at most 25 ms per frame
   drawn, so LG's 50–200 ms stalls while switching apps pause the motion instead of skipping it.
 - **Home behind the zoom is a snapshot.** LG hides Home as soon as the app's window opens, often

@@ -149,14 +149,21 @@ Item {
         tileBackSeen = item.windowProperties ? item.windowProperties.lgtvTileBack : undefined;
     }
 
-    // Home draws the tile again (lgtvTileBack changed): the card on it goes
-    // in the same frame, so the two never show together.
+    // Home draws the tile again (lgtvTileBack changed). Its frames reach the
+    // screen several frames after it says so, so the card, landed on the
+    // tile, keeps watching a pixel of the tile's slot in LG's app view, and
+    // card and shadow vanish in the very frame Home's tile is there
+    // (watching, below). Never two tiles, two shadows or none.
     property var tileBackSeen
+    property bool watching: false
     function tileBack() {
         var value = home && home.windowProperties ? home.windowProperties.lgtvTileBack : undefined;
         if (value === tileBackSeen) return;
         tileBackSeen = value;
-        if (closing && card.visible) reset();
+        if (closing && card.visible) {
+            watching = true;
+            landWait.restart();
+        }
     }
 
     function readTile(launch) {
@@ -294,6 +301,7 @@ Item {
         drawWait.stop();
         redraws.target = null;
         card.visible = false;
+        watching = false;
         homeShot.visible = false;
         homeShot.live = false;
         useSnapshot = false;
@@ -370,6 +378,7 @@ Item {
     Timer {
         id: landWait
         interval: 400
+        // No word from Home, or its tile never seen: fade.
         onTriggered: land.start()
     }
     NumberAnimation {
@@ -451,6 +460,24 @@ Item {
         source: root.tile && root.tile.icon ? "file://" + root.tile.icon : ""
     }
 
+    // A few pixels of LG's app view at the tile's left edge, half way down
+    // (clear of the corners, the icon and most of the highlight): there,
+    // Home's tile is plain tile colour. Like the snapshot, a pixel just off
+    // screen so that it is drawn.
+    ShaderEffectSource {
+        id: probe
+        x: -1
+        width: 1
+        height: 1
+        live: true
+        sourceItem: root.watching ? views.fullscreen : null
+        sourceRect: root.tile ? Qt.rect(Math.round(root.tile.x + 12), Math.round(root.tile.y + root.tile.h / 2) - 1, 2, 2)
+                              : Qt.rect(0, 0, 2, 2)
+        textureSize: Qt.size(2, 2)
+    }
+    // What Home's tile has there.
+    readonly property color probeColor: root.tile ? Qt.tint(root.tile.top, "#80" + root.tile.bottom.substr(1)) : "black"
+
     // The focused tile's shadow, as Home draws it (common/gfx.cpp), under the
     // card while it is small: there as the card lands, as Home draws its own.
     ShaderEffect {
@@ -468,6 +495,9 @@ Item {
         property real radius: root.tile ? root.tile.r / (1 + 0.1 * root.tile.shadow) : 0
         property real spread: blur
         property real strength: root.tile && root.tile.shadow ? 0.55 * root.tile.shadow * Math.max(0, 1 - root.t) : 0
+        property variant probeTexture: probe
+        property color probeColor: root.probeColor
+        property real watching: root.watching ? 1 : 0
 
         fragmentShader: "
             varying highp vec2 qt_TexCoord0;
@@ -476,8 +506,15 @@ Item {
             uniform highp float radius;
             uniform highp float spread;
             uniform lowp float strength;
+            uniform sampler2D probeTexture;
+            uniform lowp vec4 probeColor;
+            uniform lowp float watching;
 
             void main() {
+                if (watching > 0.5 && all(lessThan(abs(texture2D(probeTexture, vec2(0.5)).rgb - probeColor.rgb), vec3(0.06)))) {
+                    gl_FragColor = vec4(0.0);
+                    return;
+                }
                 highp vec2 p = qt_TexCoord0 * (shapeSize + vec2(2.0 * spread)) - vec2(spread) - shapeSize * 0.5;
                 highp vec2 q = abs(p) - shapeSize * 0.5 + vec2(radius);
                 highp float d = min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - radius;
@@ -517,6 +554,9 @@ Item {
         // The picture until the last stretch, then the tile.
         // The focused tile's highlight, as Home draws it: there as the card
         // lands, so nothing changes when the card goes.
+        property variant probeTexture: probe
+        property color probeColor: root.probeColor
+        property real watching: root.watching ? 1 : 0
         property vector3d shine: root.tile && root.tile.shine
                                  ? Qt.vector3d(root.tile.sx, root.tile.sy, root.tile.shine * Math.max(0, 1 - root.t))
                                  : Qt.vector3d(0, 0, 0)
@@ -539,6 +579,9 @@ Item {
             uniform highp vec2 snapScale;
             uniform lowp float snapMix;
             uniform highp vec3 shine;
+            uniform sampler2D probeTexture;
+            uniform lowp vec4 probeColor;
+            uniform lowp float watching;
 
             // Signed distance from p to a rounded rectangle centred on 0.
             highp float box(highp vec2 p, highp vec2 halfSize, highp float r) {
@@ -547,6 +590,11 @@ Item {
             }
 
             void main() {
+                // Home's own tile is on screen: nothing to draw.
+                if (watching > 0.5 && all(lessThan(abs(texture2D(probeTexture, vec2(0.5)).rgb - probeColor.rgb), vec3(0.06)))) {
+                    gl_FragColor = vec4(0.0);
+                    return;
+                }
                 highp vec2 p = qt_TexCoord0 * cardSize;
                 lowp float inside = clamp(0.5 - box(p - cardSize * 0.5, cardSize * 0.5, radius), 0.0, 1.0);
                 lowp vec4 c = mix(topColor, bottomColor, qt_TexCoord0.y);
