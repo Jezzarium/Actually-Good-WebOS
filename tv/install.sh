@@ -2,7 +2,8 @@
 # Install the home screen and the Control Center on a rooted TV (Homebrew Channel
 # and its SSH server), from this machine: tv/install.sh
 #
-# Builds both apps, installs them, makes Home the TV's home (Home button and
+# Builds both apps (downloading Apple's SF Pro first if it isn't there yet;
+# tools/get-sf-pro.sh), installs them, makes Home the TV's home (Home button and
 # power-on), keeps it resident, sends the Settings key to the Control Center and
 # installs the boot scripts that re-apply what LG resets. Safe to run again,
 # e.g. to update the apps. Removes the web Quick Settings (an earlier version) the
@@ -34,6 +35,12 @@ step() { echo "== $*"; }
 KILLTREE='killtree() { for c in $(pgrep -P "$1"); do killtree "$c"; done; kill "$1"; }'
 
 if [ -n "$build" ]; then
+    # SF Pro isn't in git (see tools/get-sf-pro.sh). Without it the apps build
+    # with LG's own font, so a failed download only warns.
+    if [ ! -f home/assets/fonts/SF-Pro-Display-Semibold.otf ] || [ ! -f control/assets/fonts/SF-Pro-Display-Regular.otf ]; then
+        step "downloading SF Pro"
+        tools/get-sf-pro.sh || echo "SF Pro not installed; the apps will use LG's font" >&2
+    fi
     step building
     home/build.py
     control/build.py
