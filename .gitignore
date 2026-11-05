@@ -10,3 +10,6 @@ tv/local/
 
 # Python bytecode (the build scripts import common/native_build.py)
 __pycache__/
+
+# Apple's SF Pro (not redistributable; tools/get-sf-pro.sh fetches it)
+*/assets/fonts/

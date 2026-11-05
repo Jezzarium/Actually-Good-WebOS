@@ -29,7 +29,7 @@ class Panel {
 public:
     enum class Root { kSettings, kInputs };
 
-    bool init(const std::string &font_dir, const std::string &icons_dir, Tv *tv, Bluetooth *bt);
+    bool init(const std::string &assets, const std::string &icons_dir, Tv *tv, Bluetooth *bt);
     // Where it hangs from: the pill's right edge, and its bottom plus a gap.
     void set_anchor(float right, float top);
 

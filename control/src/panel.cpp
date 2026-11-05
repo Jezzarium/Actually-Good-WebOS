@@ -1,5 +1,6 @@
 #include "panel.h"
 
+#include "fonts.h"
 #include "log.h"
 
 #include <SDL_image.h>
@@ -94,17 +95,18 @@ std::string fit(TTF_Font *font, std::string s, float width) {
 
 }  // namespace
 
-bool Panel::init(const std::string &font_dir, const std::string &icons_dir, Tv *tv, Bluetooth *bt) {
+bool Panel::init(const std::string &assets, const std::string &icons_dir, Tv *tv, Bluetooth *bt) {
     tv_ = tv;
     bt_ = bt;
     icons_dir_ = icons_dir;
-    std::string semibold = font_dir + "/LG_Smart_UI-SemiBold.ttf", regular = font_dir + "/LG_Smart_UI-Regular.ttf";
+    std::string semibold = fonts::ui(assets, fonts::Weight::Semibold);
+    std::string regular = fonts::ui(assets, fonts::Weight::Regular);
     label_font_ = TTF_OpenFont(semibold.c_str(), 28);
     value_font_ = TTF_OpenFont(semibold.c_str(), 26);
     title_font_ = TTF_OpenFont(semibold.c_str(), 30);
     small_font_ = TTF_OpenFont(regular.c_str(), 22);
     if (!label_font_ || !value_font_ || !title_font_ || !small_font_) {
-        LOG("panel: fonts in %s: %s", font_dir.c_str(), TTF_GetError());
+        LOG("panel: fonts %s, %s: %s", semibold.c_str(), regular.c_str(), TTF_GetError());
         return false;
     }
     for (const char *name : {"sun", "picture", "eye", "sound", "speaker", "moon", "leaf", "power", "more", "gear",

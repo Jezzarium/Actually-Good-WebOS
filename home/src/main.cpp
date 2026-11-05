@@ -1,6 +1,7 @@
 // The home screen app: a full-screen GLES2 window on the TV (LG's SDL port,
 // Wayland underneath), or a 1920x1080 window on a desktop for development.
 
+#include "fonts.h"
 #include "gfx.h"
 #include "home.h"
 #include "lg_sdl.h"
@@ -50,10 +51,8 @@ const char *kJailMounts =
     "{ grep -q \" $J$D \" /proc/mounts || { mount --bind $D $J$D && mount --make-rslave $J$D; }; }";
 
 #ifdef LGTV_WEBOS
-const char *kFont = "/usr/share/fonts/LG_Smart_UI-SemiBold.ttf";
 const Uint32 kWindowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN;
 #else
-const char *kFont = "/usr/share/fonts/liberation/LiberationSans-Bold.ttf";
 const Uint32 kWindowFlags = SDL_WINDOW_OPENGL;
 #endif
 
@@ -109,12 +108,13 @@ int main(int argc, char **argv) {
     SDL_GL_GetDrawableSize(window, &w, &h);
     LOG("home: drawable %dx%d, %s", w, h, reinterpret_cast<const char *>(glGetString(GL_RENDERER)));
 
-    const char *font = std::getenv("HOME_FONT") ? std::getenv("HOME_FONT") : kFont;
+    const std::string font = std::getenv("HOME_FONT") ? std::getenv("HOME_FONT")
+                                                      : fonts::ui(assets_dir(), fonts::Weight::Semibold);
     const Uint64 freq = SDL_GetPerformanceFrequency();
     Uint64 t0 = SDL_GetPerformanceCounter();
     Painter painter;
     Home home;
-    if (!painter.init(w, h) || !home.init(w, h, font, assets_dir())) return 1;
+    if (!painter.init(w, h) || !home.init(w, h, font.c_str(), assets_dir())) return 1;
     LOG("home: ready in %.0f ms", double(SDL_GetPerformanceCounter() - t0) * 1000 / freq);
 
     // Everything is in place before the first frame, so the screen appears

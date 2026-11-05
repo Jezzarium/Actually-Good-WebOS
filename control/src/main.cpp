@@ -14,6 +14,7 @@
 // surface is already mapped when it is next shown.
 
 #include "bluetooth.h"
+#include "fonts.h"
 #include "gfx.h"
 #include "inputs.h"
 #include "lg_sdl.h"
@@ -45,7 +46,6 @@ namespace {
 
 const char *kAppId = "com.lgtvtweaks.control";
 const char *kHome = "com.lgtvtweaks.home";
-const char *kFontDir = "/usr/share/fonts";
 const int kScancodePlay = 450;  // LG remote's Play: not in SDL_webOS.h
 // tv/settings-key touches this just before it reloads the app hidden (Home
 // says so in the shared state instead). A relaunch that soon after is that
@@ -186,7 +186,7 @@ int main(int argc, char **argv) {
     Tv tv(luna);
     Bluetooth bt(tv);
     Panel panel;
-    if (!panel.init(kFontDir, assets_dir() + "/icons", &tv, &bt)) return 1;
+    if (!panel.init(assets_dir(), assets_dir() + "/icons", &tv, &bt)) return 1;
     tv.changed = [&panel](const std::string &id) { panel.setting_changed(id); };
     tv.error = [&panel](const std::string &message) {
         LOG("control: %s", message.c_str());
@@ -200,7 +200,7 @@ int main(int argc, char **argv) {
                    });
 
     // The pill, in Home's font so the layouts match.
-    TTF_Font *pill_font = TTF_OpenFont((std::string(kFontDir) + "/LG_Smart_UI-SemiBold.ttf").c_str(), 28);
+    TTF_Font *pill_font = TTF_OpenFont(fonts::ui(assets_dir(), fonts::Weight::Semibold).c_str(), 28);
     if (!pill_font) {
         LOG("control: pill font: %s", TTF_GetError());
         return 1;
