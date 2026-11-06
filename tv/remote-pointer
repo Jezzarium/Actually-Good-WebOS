@@ -1,0 +1,51 @@
+#!/bin/sh
+# Keep the Magic Remote pointer switch (settings: general/remotePointer) where it
+# was last set, across power-offs.
+# LG offers the switch only in Easy Mode, and surface-manager's key filters
+# (/usr/lib/qml/KeyFilters/systemUi.js, Luna caller com.webos.starfish.keyfilters)
+# set it back to "on" whenever Easy Mode is off: each time they load, so at every
+# power-on (a cold boot on this TV) and whenever the key filter list changes
+# (settings-key changes it at boot). This script remembers the last value set by
+# anyone else (the Control Center, LG's settings) in $STATE and puts it back after
+# each reset. With no value remembered yet it leaves the setting alone.
+# Installed to /var/lib/webosbrew/init.d/. Undo: rm this script and $STATE.
+# Installed and removed by tv/install.sh and tv/uninstall.sh.
+
+STATE=/var/lib/lgtv-tweaks/remote-pointer
+PIDFILE=/tmp/remote-pointer.pid
+LG_RESET=com.webos.starfish.keyfilters
+
+[ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null && exit 0
+
+field() { sed -n "s/.*\"$1\": *\"\([^\"]*\)\".*/\1/p"; }
+
+apply() {
+    luna-send -n 1 luna://com.webos.settingsservice/setSystemSettings \
+        "{\"category\":\"general\",\"settings\":{\"remotePointer\":\"$1\"}}" </dev/null >/dev/null 2>&1
+}
+
+(
+    while :; do
+        luna-send -i luna://com.webos.settingsservice/getSystemSettings \
+            '{"category":"general","keys":["remotePointer"],"subscribe":true}' </dev/null 2>/dev/null |
+        while read -r line; do
+            value=$(printf '%s' "$line" | field remotePointer)
+            [ -n "$value" ] || continue
+            caller=$(printf '%s' "$line" | field caller)
+            saved=$(cat "$STATE" 2>/dev/null)
+            case "$caller" in
+                # The first reply (the value now, maybe reset before this script
+                # started), LG's reset, or a change the settings service made
+                # itself (seen without a caller during boot).
+                ''|"$LG_RESET")
+                    [ -n "$saved" ] && [ "$value" != "$saved" ] && apply "$saved" ;;
+                # Someone chose it: remember. (Our own apply lands here too, with
+                # the value already saved.)
+                *)
+                    [ "$value" = "$saved" ] || { echo "$value" > "$STATE.tmp" && mv "$STATE.tmp" "$STATE"; } ;;
+            esac
+        done
+        sleep 5
+    done
+) </dev/null >/dev/null 2>&1 &
+echo $! > "$PIDFILE"

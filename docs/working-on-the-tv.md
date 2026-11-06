@@ -66,8 +66,13 @@ The Magic Remote pointer has an on/off switch: settingsservice `general` / `remo
 (More settings → General).
 
 - `/usr/lib/qml/KeyFilters/systemUi.js` (`cb_systemProfileStatus`) sets it back to `"on"` whenever
-  Easy Mode (systemprofile `seniorMode`) is off, and that runs when surface-manager starts. So
-  `"off"` most likely doesn't survive a reboot; a boot script would have to set it again.
+  Easy Mode (systemprofile `seniorMode`) is off. It runs each time surface-manager loads its key
+  filters: at boot, and again whenever `com.webos.surfacemanager.keyFilters` changes (settings-key
+  changes it at boot, so there are several resets in the first few minutes). The settings change
+  notification names it as caller `com.webos.starfish.keyfilters`.
+- Power-off is sometimes a cold boot (uptime back to 0) and sometimes Active Standby; only cold
+  boots reset it. `tv/remote-pointer` (a boot script) remembers the last value anyone else set in
+  `/var/lib/lgtv-tweaks/remote-pointer` and puts it back after each reset.
 - Not yet confirmed with the remote in hand that `"off"` really hides the cursor.
 - lginput2 (`com.webos.service.mrcu`) and surface-manager (`StarfishViewAdjustments.qml`) both
   subscribe to it. mrcu also has private calls (`activateMotionSensor`, `setHotkeyCursorPolicy`,

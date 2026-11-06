@@ -85,7 +85,7 @@ if tv "[ -d /media/developer/apps/usr/palm/applications/$OLD_SETTINGS_ID ]"; the
 fi
 
 step "boot scripts"
-scripts="settings-key default-home"
+scripts="settings-key default-home remote-pointer"
 [ -n "$trim" ] && scripts="$scripts trim-preloads"
 tv 'mkdir -p /var/lib/webosbrew/init.d /var/lib/lgtv-tweaks && cat > /var/lib/lgtv-tweaks/settingskey.js' < tv/settingskey.js
 # The app transitions, loaded into surface-manager by settings-key.

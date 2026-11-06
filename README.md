@@ -136,6 +136,7 @@ Copied to `/var/lib/webosbrew/init.d/` on the TV, where the Homebrew Channel run
 | `transitions.js` + `Transitions.qml` | tvOS-style app transitions, drawn inside surface-manager: opening an app from a Home tile grows the tile to full screen, and going back Home shrinks the app into its tile. Put at the front of the key filter list by `settings-key`. See [App transitions](#app-transitions). |
 | `settings-key` + `settingskey.js` | Adds a key handler to surface-manager (`com.webos.surfacemanager.keyFilters`) so the Settings button opens the Control Center. Loads that app hidden at boot (the TV may boot into an input, and the button must be instant there too) and again after an app switch if it was closed, and writes the foreground app's id to `/tmp/lgtv-control.foreground` for it. No system files are patched. |
 | `default-home` | Opens the default Home app at power-on if the TV didn't (see [Home screen](#home-screen-home)) and keeps LG's home out of memory while something else is the default. |
+| `remote-pointer` | Keeps the Remote pointer switch where it was last set. LG turns the Magic Remote pointer back on at every boot (it allows turning it off only in Easy Mode); this remembers the last choice in `/var/lib/lgtv-tweaks/remote-pointer` and puts it back. |
 | `trim-preloads` | Stops LG's preload manager keeping unused apps (browser, voice, Prime Video, Netflix, Live TV, LG Channels) in memory, at boot and after every wake. |
 
 `settingskey.js`, `transitions.js` and `Transitions.qml` live in `/var/lib/lgtv-tweaks/` on the TV.
