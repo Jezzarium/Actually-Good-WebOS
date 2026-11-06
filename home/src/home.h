@@ -43,6 +43,7 @@ public:
     void pointer_up();
     void wheel(int steps);  // positive: up
     void pointer_hidden();  // LG hides the pointer after a while or on a key
+    void focus_gained();    // the window has the remote again: back in front, or an overlay closed
     void options();         // Play/Pause: the focused tile's menu, like a long press
     void update(float dt);
     void render(Painter &p);
@@ -59,6 +60,15 @@ public:
 
     // Apps, and the Control Center when it isn't running. params: JSON, or empty.
     std::function<void(const std::string &app_id, const std::string &params)> on_launch;
+    // The tile of the app last opened from Home, as JSON (empty once it is
+    // gone): where it sits and how it looks, for tv/Transitions.qml, which
+    // zooms it to full screen as the app opens and shrinks the app back into
+    // it on the way Home. Sent before the launch, and again whenever the tile
+    // moves. main.cpp sets it as a property of Home's window.
+    std::function<void(const std::string &json)> on_tile;
+    // Home has drawn that tile again after leaving it out for the
+    // transition: the card drawn over it can go. A new value each time.
+    std::function<void(const std::string &count)> on_tile_back;
 
 private:
     // Focus rows: kPill is the status pill (column 0 Inputs, 1 Control Center,
@@ -130,6 +140,14 @@ private:
     bool night_now() const;
 
     void draw_tile(Painter &p, int index);
+    void tile_colors(const Tile &t, Color *top, Color *bottom) const;
+    // For on_tile: the launched app's tile, settled (where it is heading).
+    std::string tile_json(int index);
+    void publish_tile();
+    // The launched app's tile isn't drawn while tv/Transitions.qml draws it,
+    // zooming out of it or shrinking back into it.
+    void hide_tile(uint64_t ms);
+    bool tile_hidden(int index) const;
 
     // The Control Center: what Home publishes for it and asks of it.
     void request(shell::Request r);
@@ -172,8 +190,19 @@ private:
     uint64_t preloaded_ms_ = 0;         // when Home last loaded it
     long long foreground_written_ = -1;  // /tmp/lgtv-control.foreground's mtime when last read
     bool foreground_home_ = true;
+    std::string foreground_id_;  // the app in front, as that file last said
     uint64_t leaving_until_ = 0;        // an app was just launched: the pill goes before LG switches
     long long leaving_written_ = 0;
+
+    std::string launched_;    // the app last opened from a tile
+    int launches_ = 0;        // tiles opened, so each opening is new to the compositor
+    std::string tile_sent_;   // what on_tile last sent
+    uint64_t tile_hidden_until_ = 0;
+    int frames_ = 0;          // drawn so far
+    int launch_frame_ = -1;   // the launch waits for this frame: the first without the tile
+    bool tile_left_out_ = false;  // in the frame being drawn
+    bool tile_back_ = false;      // the last frame drew it again: say so
+    int tile_backs_ = 0;
 
     Menu tile_menu_;  // Move, Hide
     Menu settings_;

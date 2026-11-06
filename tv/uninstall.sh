@@ -45,7 +45,7 @@ if len(kept) != len(items):
 
 step "boot scripts"
 tv "$KILLTREE
-for s in settings-key default-home trim-preloads; do
+for s in settings-key default-home remote-pointer trim-preloads; do
     rm -f /var/lib/webosbrew/init.d/\$s
     [ -f /tmp/\$s.pid ] && killtree \$(cat /tmp/\$s.pid) 2>/dev/null
     rm -f /tmp/\$s.pid
@@ -53,11 +53,14 @@ done
 # What settings-key wrote for the Control Center.
 rm -f /tmp/lgtv-control.foreground /tmp/lgtv-control.preload; true"
 
-step "Settings key back to LG"
-# The handler goes out of surface-manager's list before its file is deleted.
-new=$(without com.webos.surfacemanager.keyFilters 'e.get("handler") == "handleQuickSettingsKey"')
+step "Settings key and app transitions back to LG"
+# The handlers go out of surface-manager's list before their files are deleted.
+# The transitions layer then stops and gives LG's views back; it is gone for
+# good at the next reboot.
+new=$(without com.webos.surfacemanager.keyFilters 'e.get("handler") in ("handleQuickSettingsKey", "handleTransitionKeys")')
 [ -n "$new" ] && luna luna://com.webos.service.config/setConfigs "$new"
-tv 'rm -f /var/lib/lgtv-tweaks/settingskey.js; rmdir /var/lib/lgtv-tweaks 2>/dev/null; true'
+tv 'rm -f /var/lib/lgtv-tweaks/settingskey.js /var/lib/lgtv-tweaks/transitions.js /var/lib/lgtv-tweaks/Transitions.qml /var/lib/lgtv-tweaks/remote-pointer
+rmdir /var/lib/lgtv-tweaks 2>/dev/null; true'
 
 step "Home button and power-on back to LG Home"
 tv 'rm -f /var/webos-profile/override/lgtvtweaks_profile.json'

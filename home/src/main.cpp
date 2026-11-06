@@ -1,8 +1,10 @@
 // The home screen app: a full-screen GLES2 window on the TV (LG's SDL port,
 // Wayland underneath), or a 1920x1080 window on a desktop for development.
 
+#include "fonts.h"
 #include "gfx.h"
 #include "home.h"
+#include "lg_sdl.h"
 #include "log.h"
 #include "luna.h"
 
@@ -49,10 +51,8 @@ const char *kJailMounts =
     "{ grep -q \" $J$D \" /proc/mounts || { mount --bind $D $J$D && mount --make-rslave $J$D; }; }";
 
 #ifdef LGTV_WEBOS
-const char *kFont = "/usr/share/fonts/LG_Smart_UI-SemiBold.ttf";
 const Uint32 kWindowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN;
 #else
-const char *kFont = "/usr/share/fonts/liberation/LiberationSans-Bold.ttf";
 const Uint32 kWindowFlags = SDL_WINDOW_OPENGL;
 #endif
 
@@ -108,12 +108,13 @@ int main(int argc, char **argv) {
     SDL_GL_GetDrawableSize(window, &w, &h);
     LOG("home: drawable %dx%d, %s", w, h, reinterpret_cast<const char *>(glGetString(GL_RENDERER)));
 
-    const char *font = std::getenv("HOME_FONT") ? std::getenv("HOME_FONT") : kFont;
+    const std::string font = std::getenv("HOME_FONT") ? std::getenv("HOME_FONT")
+                                                      : fonts::ui(assets_dir(), fonts::Weight::Semibold);
     const Uint64 freq = SDL_GetPerformanceFrequency();
     Uint64 t0 = SDL_GetPerformanceCounter();
     Painter painter;
     Home home;
-    if (!painter.init(w, h) || !home.init(w, h, font, assets_dir())) return 1;
+    if (!painter.init(w, h) || !home.init(w, h, font.c_str(), assets_dir())) return 1;
     LOG("home: ready in %.0f ms", double(SDL_GetPerformanceCounter() - t0) * 1000 / freq);
 
     // Everything is in place before the first frame, so the screen appears
@@ -195,6 +196,12 @@ int main(int argc, char **argv) {
                       });
             json_object_put(params);
         };
+        home.on_tile = [window](const std::string &json) {
+            if (!lg_sdl::set_property(window, "lgtvLaunch", json.c_str())) LOG("home: can't set window properties");
+        };
+        home.on_tile_back = [window](const std::string &count) {
+            lg_sdl::set_property(window, "lgtvTileBack", count.c_str());
+        };
     } else {
         LOG("home: no Luna bus");
         home.set_layout_path("/tmp/lgtv-home-layout.json");
@@ -231,6 +238,7 @@ int main(int argc, char **argv) {
                 if (e.type == SDL_KEYDOWN) home.key_down(key, e.key.repeat);
                 else home.key_up(key);
             }
+            if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) home.focus_gained();
             if (e.type == SDL_MOUSEMOTION) home.pointer_move(float(e.motion.x), float(e.motion.y));
             if ((e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP) && e.button.button == SDL_BUTTON_LEFT) {
                 home.pointer_move(float(e.button.x), float(e.button.y));

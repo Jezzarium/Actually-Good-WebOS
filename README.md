@@ -2,7 +2,7 @@
 
 WebOS's default app launcher sucks. I decided to blatantly copy Apple's tvOS home screen and make an actually good app launcher. This also includes a Control Center for the settings you change most. It's way faster than WebOS's default menu and actually looks good. 
 
-![The home screen: moving along the dock, then switching the wallpaper in Home Settings](docs/demofinal.gif)
+![The home screen: moving through the dock and app grid, switching wallpapers and day/night in Home Settings, opening an app from its tile, the Control Center over the app, and back Home](docs/demofinal.gif)
 
 This was entirely written using Claude Code on Opus 5.5. It works on my machine but it probably won't on yours in its current state. Feel free to fork this!
 
@@ -133,20 +133,48 @@ Copied to `/var/lib/webosbrew/init.d/` on the TV, where the Homebrew Channel run
 
 | Script | What it does |
 |---|---|
+| `transitions.js` + `Transitions.qml` | tvOS-style app transitions, drawn inside surface-manager: opening an app from a Home tile grows the tile to full screen, and going back Home shrinks the app into its tile. Put at the front of the key filter list by `settings-key`. See [App transitions](#app-transitions). |
 | `settings-key` + `settingskey.js` | Adds a key handler to surface-manager (`com.webos.surfacemanager.keyFilters`) so the Settings button opens the Control Center. Loads that app hidden at boot (the TV may boot into an input, and the button must be instant there too) and again after an app switch if it was closed, and writes the foreground app's id to `/tmp/lgtv-control.foreground` for it. No system files are patched. |
 | `default-home` | Opens the default Home app at power-on if the TV didn't (see [Home screen](#home-screen-home)) and keeps LG's home out of memory while something else is the default. |
+| `remote-pointer` | Keeps the Remote pointer switch where it was last set. LG turns the Magic Remote pointer back on at every boot (it allows turning it off only in Easy Mode); this remembers the last choice in `/var/lib/lgtv-tweaks/remote-pointer` and puts it back. |
 | `trim-preloads` | Stops LG's preload manager keeping unused apps (browser, voice, Prime Video, Netflix, Live TV, LG Channels) in memory, at boot and after every wake. |
 
-`settingskey.js` lives in `/var/lib/lgtv-tweaks/` on the TV.
+`settingskey.js`, `transitions.js` and `Transitions.qml` live in `/var/lib/lgtv-tweaks/` on the TV.
+
+### App transitions
+
+Opening an app from a tile on Home, the tile (its colour and icon) grows from its spot to full
+screen, holds there like a splash until the app has drawn, then fades to show it. Going back
+Home with the Home key, the app's last picture shrinks into its tile and turns into it as it
+lands. Both move on springs, set the way Apple describes them (a damping ratio and a response):
+a soft start, a fast middle and a long, gentle settle, with a hint of bounce as the app lands.
+
+- **How:** just before launching from a tile, Home sets the window property `lgtvLaunch` on its
+  own window (where the tile is and how it looks). `Transitions.qml` runs inside surface-manager
+  as a layer over the app and LG's splash, under every overlay (the Control Center, the volume,
+  notifications). When Home, Back or OK goes down in that app it captures the app's picture on
+  the GPU, since LG hides the app the instant Home comes back.
+- **Video** is on a plane of its own that can't be captured: the tile's art shrinks instead.
+- **Not from a tile** (an input, LG's settings, a launch from another app): LG's usual cut.
+- **Off switch:** take `handleTransitionKeys` out of `com.webos.surfacemanager.keyFilters` (as
+  `tv/uninstall.sh` does). The layer stops and gives LG's views back at once; it is gone for good
+  at the next reboot.
+
+## Known issues
+
+- **Quitting an app opens LG's home, not this one.** When an app quits itself (Back, then
+  "Exit" in its dialog) or is closed, the app manager brings up LG Home (`com.webos.app.home`),
+  which starts cold: about 1.5 s of black, then LG's launcher. The Home button still opens this
+  Home. Because of this the shrink back into the tile only plays with the Home key, never after
+  quitting with Back (`Transitions.qml` handles that case, but it can't happen yet).
+- **A small hitch at the start of an opening.** LG's own work switching apps holds up the
+  compositor for about 50 ms in the fastest part of the zoom.
 
 `tv/uninstall.sh` undoes all of `tv/install.sh`: the Settings button, Home and power-on, the keep-alive list, the preloads `default-home` and `trim-preloads` turned off, the boot scripts and both apps. It edits the TV's current lists rather than restoring old copies; `tv/*_before.json` are LG's originals, for reference.
 
 ## Notes for working on the TV
 
-- `luna-send` prints nothing over SSH unless stdin is redirected: `luna-send -n 1 <uri> '<json>' </dev/null`.
-- `/usr` and `/etc` are read-only. Changes go in `/var`, through LG's config service (`com.webos.service.config/setConfigs`), or as bind mounts.
-- LG's settings schema is `/etc/palm/description.json` (about 1,950 settings with types, allowed values and dimensions).
-- `ls-monitor` on the TV records live Luna traffic, useful for seeing exactly what LG's own menus call.
+See [docs/working-on-the-tv.md](docs/working-on-the-tv.md): Luna over SSH, where changes can go, logs, crash dumps, screenshots, what input can't be simulated, and commands to avoid.
 
 ## Credits
 

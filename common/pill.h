@@ -13,7 +13,7 @@ class Pill {
 public:
     enum Button { kInputs, kControl, kSettings, kButtons };
 
-    // font: LG Smart UI SemiBold at 28 px in both apps, so the layouts match.
+    // font: the UI font (common/fonts.h), semibold at 28 px in both apps, so the layouts match.
     void init(TTF_Font *font);
     // Renders the clock again when the minute has changed; true if it did.
     bool refresh_clock();

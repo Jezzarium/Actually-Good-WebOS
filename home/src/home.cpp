@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <ctime>
 #include <fstream>
 #include <map>
@@ -38,6 +39,7 @@ constexpr float kLeanPixels = 7;
 // Where the shine rests once the tile is still (0..1 of the tile), and how far
 // a full lean moves it.
 constexpr float kShineX = 0.5f, kShineY = -0.05f, kShineTravel = 0.55f;
+constexpr float kShineStrength = 0.24f;  // on the focused tile
 
 // Holding OK this long opens the tile menu.
 constexpr float kLongPress = 0.6f;
@@ -61,6 +63,12 @@ constexpr uint64_t kControlAlive = 1000, kPreloadInterval = 10000;
 // After launching an app, the pill stays hidden until the foreground changes,
 // or this long if the launch goes nowhere.
 constexpr uint64_t kLeavingTime = 3000;
+// How long the launched app's tile is left out while tv/Transitions.qml draws
+// it: the zoom to full screen (Home is then hidden; the time is for a launch
+// that goes nowhere), and the shrink back, until the card is on the tile.
+// The compositor drops the card in the frame Home says the tile is back.
+constexpr uint64_t kTileOpening = 5000, kTileClosing = 700;
+constexpr int kLaunchDelayFrames = 8;
 
 // Wallpapers: bundled in assets/wallpapers, plus any the user copies here.
 const char *kUserWallpapers = "/var/lib/lgtv-home/wallpapers";
@@ -470,7 +478,16 @@ void Home::activate() {
     } else if (row_ == kPill) {
         request(col_ == Pill::kControl ? shell::kOpenPanel : shell::kOpenInputs);
     } else if (!tiles_.empty()) {
-        launch_app(tiles_[tile_index(row_, col_)].app.id);
+        // Where the tile is goes out now: the zoom starts over it. The tile
+        // leaves Home, and the launch waits until the compositor shows Home
+        // without it (it shows Home's frames several frames late, and a
+        // running app such as YouTube is in front 50 ms after the launch): it
+        // keeps its picture of Home under the zoom up to date until then.
+        launched_ = tiles_[tile_index(row_, col_)].app.id;
+        launches_++;
+        hide_tile(kTileOpening);
+        publish_tile();
+        launch_frame_ = frames_ + kLaunchDelayFrames;
     }
 }
 
@@ -715,6 +732,7 @@ bool Home::front() {
         std::getline(f, id);
         // No file yet (tv/settings-key starts after Home at boot): Home is the first app.
         foreground_home_ = !written || id == kHomeId;
+        foreground_id_ = id;
     }
     if (leaving_until_ && (written != leaving_written_ || shell::now_ms() > leaving_until_)) leaving_until_ = 0;
     return foreground_home_ && !leaving_until_;
@@ -767,6 +785,13 @@ void Home::publish() {
 
 void Home::update(float dt) {
     time_ += dt;
+    // The frame just drawn has the tile again (after the swap: the compositor
+    // sees that frame before this).
+    if (tile_back_ && on_tile_back) on_tile_back(std::to_string(++tile_backs_));
+    tile_back_ = false;
+    bool left_out = !launched_.empty() && shell::now_ms() < tile_hidden_until_;
+    if (tile_left_out_ && !left_out) tile_back_ = true;
+    tile_left_out_ = left_out;
     icons_.upload_ready();
 
     if (holding_ && !held_long_) {
@@ -822,9 +847,79 @@ void Home::update(float dt) {
     if (pill_.refresh_clock()) night_.target = night_now() ? 1 : 0;
     watch_control();
     publish();
+    if (launch_frame_ >= 0 && frames_ >= launch_frame_) {
+        launch_frame_ = -1;
+        launch_app(launched_);
+    }
+    publish_tile();
+}
+
+void Home::focus_gained() {
+    // Back from the app last opened from a tile: the file still names it
+    // (settings-key writes Home's id a moment later), and the compositor is
+    // shrinking it into the tile.
+    front();
+    if (!launched_.empty() && foreground_id_ == launched_) hide_tile(kTileClosing);
+}
+
+void Home::hide_tile(uint64_t ms) {
+    tile_hidden_until_ = shell::now_ms() + ms;
+    tile_left_out_ = true;  // from the next frame, not the next update
+}
+
+bool Home::tile_hidden(int index) const { return tile_left_out_ && tiles_[index].app.id == launched_; }
+
+void Home::tile_colors(const Tile &t, Color *top, Color *bottom) const {
+    uint32_t color = t.app.color;
+    bool seamless = icons_.edge_color(t.app.icon, &color);
+    // A gentle vertical gradient, flat where it has to meet the icon's edge.
+    *top = seamless ? rgb(color) : shade(color, 1.15f, 0.06f);
+    *bottom = seamless ? rgb(color) : shade(color, 0.85f);
+}
+
+std::string Home::tile_json(int index) {
+    const Tile &t = tiles_[index];
+    int row, col;
+    index_to_slot(index, &row, &col);
+    Rect slot = tile_rect(row, col);
+    slot.y -= scroll_.target;
+    float k = 1 + kFocusScale * t.focus.target;
+    Rect s = slot.scaled(k);
+    Color top, bottom;
+    tile_colors(t, &top, &bottom);
+    auto hex = [](Color c) {
+        char buf[8];
+        std::snprintf(buf, sizeof buf, "#%02x%02x%02x", int(std::lround(c.r * 255)), int(std::lround(c.g * 255)),
+                      int(std::lround(c.b * 255)));
+        return std::string(buf);
+    };
+    // Ids and paths come from LG's app list: no quotes or backslashes to escape.
+    Texture icon = icons_.get(t.app.icon);
+    float ih = icon.id ? kIconSize * k : 0, iw = icon.id ? ih * icon.w / icon.h : 0;
+    char json[512];
+    std::snprintf(json, sizeof json,
+                  R"({"n":%d,"id":"%s","x":%.1f,"y":%.1f,"w":%.1f,"h":%.1f,"r":%.1f,"top":"%s","bottom":"%s",)"
+                  R"("icon":"%s","iw":%.1f,"ih":%.1f,"ir":%.1f,"sx":%.2f,"sy":%.2f,"shine":%.2f,"shadow":%.2f})",
+                  launches_, t.app.id.c_str(), s.x, s.y, s.w, s.h, kRadius * k, hex(top).c_str(),
+                  hex(bottom).c_str(), icon.id ? t.app.icon.c_str() : "", iw, ih, kIconRadius * k, kShineX, kShineY,
+                  kShineStrength * t.focus.target, t.focus.target);
+    return json;
+}
+
+void Home::publish_tile() {
+    if (launched_.empty() || !on_tile) return;
+    std::string json;
+    for (int i = 0; i < int(tiles_.size()); i++) {
+        if (tiles_[i].app.id == launched_) json = tile_json(i);
+    }
+    if (json.empty()) launched_.clear();  // hidden or uninstalled
+    if (json == tile_sent_) return;
+    tile_sent_ = json;
+    on_tile(json);
 }
 
 void Home::draw_tile(Painter &p, int index) {
+    if (tile_hidden(index)) return;
     Tile &tile = tiles_[index];
     int row, col;
     index_to_slot(index, &row, &col);
@@ -845,11 +940,8 @@ void Home::draw_tile(Painter &p, int index) {
     }
     // The shine moves with the lean and rests once the tile is still.
     float sx = kShineX + tile.lean_x.x * kShineTravel, sy = kShineY + tile.lean_y.x * kShineTravel;
-    uint32_t color = tile.app.color;
-    bool seamless = icons_.edge_color(tile.app.icon, &color);
-    // A gentle vertical gradient, flat where it has to meet the icon's edge.
-    Color top = seamless ? rgb(color) : shade(color, 1.15f, 0.06f);
-    Color bottom = seamless ? rgb(color) : shade(color, 0.85f);
+    Color top, bottom;
+    tile_colors(tile, &top, &bottom);
     float radius = kRadius * k;
     p.fill(s, radius, top, bottom);
 
@@ -864,7 +956,7 @@ void Home::draw_tile(Painter &p, int index) {
         p.image(name, 0, tile.name, rgb(0xffffff));
     }
     // Over the icon too, so the whole tile catches the light like a sheet of glass.
-    p.shine(s, radius, sx, sy, 0.24f * f);
+    p.shine(s, radius, sx, sy, kShineStrength * f);
     p.set_rotation(0);
 
     if (row >= 1) {
@@ -930,4 +1022,5 @@ void Home::render(Painter &p) {
     // Drops from the pill's corner, like Inputs and the Control Center.
     Rect pill = pill_.rect();
     draw_menu(p, settings_, pill.x + pill.w - kSettingsW, pill.y + pill.h + 14, kSettingsW, 1);
+    frames_++;
 }
