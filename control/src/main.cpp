@@ -110,13 +110,15 @@ struct PillFrame {
     float alpha = -1, focus[Pill::kButtons] = {};
     bool gear = false, glass = false;
     int minute = -1;
+    unsigned backdrop = 0;  // Panel::backdrop_version(): a new wallpaper redraws the glass
 
     bool same(const PillFrame &o) const {
         auto near = [](float a, float b) { return std::abs(a - b) < 0.002f; };
         for (int i = 0; i < Pill::kButtons; i++) {
             if (!near(focus[i], o.focus[i])) return false;
         }
-        return near(alpha, o.alpha) && gear == o.gear && glass == o.glass && minute == o.minute;
+        return near(alpha, o.alpha) && gear == o.gear && glass == o.glass && minute == o.minute &&
+               backdrop == o.backdrop;
     }
 };
 
@@ -451,6 +453,7 @@ int main(int argc, char **argv) {
             backdrop_checked = now;
         }
         frame.glass = fg.home() && panel.backdrop().id;
+        frame.backdrop = panel.backdrop_version();
         std::time_t t = std::time(nullptr);
         std::tm local;
         localtime_r(&t, &local);

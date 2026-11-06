@@ -51,6 +51,8 @@ public:
     // Home's blurred wallpaper (again if Home saved a new one); none until Home has run.
     void load_backdrop();
     const Texture &backdrop() const { return backdrop_; }
+    // Goes up each time a new backdrop is loaded, so the pill knows to redraw.
+    unsigned backdrop_version() const { return backdrop_version_; }
     Texture icon(const std::string &name);
 
     void key_down(SDL_Keycode key, bool repeat);
@@ -147,7 +149,8 @@ private:
 
     Texture toast_;
     Texture backdrop_;  // Home's blurred wallpaper; none until Home has run
-    time_t backdrop_time_ = 0;
+    timespec backdrop_time_ = {};  // the file's mtime, to the nanosecond: Home can save twice a second
+    unsigned backdrop_version_ = 0;
     bool over_home_ = false;  // Home's wallpaper glass; dark glass over any other app
     float toast_time_ = 0;
 };

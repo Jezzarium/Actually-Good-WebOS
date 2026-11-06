@@ -467,8 +467,9 @@ void Panel::pop() {
 
 void Panel::load_backdrop() {
     struct stat st;
-    if (stat(kBackdrop, &st) != 0 || st.st_mtime == backdrop_time_) return;
-    backdrop_time_ = st.st_mtime;
+    if (stat(kBackdrop, &st) != 0) return;
+    if (st.st_mtim.tv_sec == backdrop_time_.tv_sec && st.st_mtim.tv_nsec == backdrop_time_.tv_nsec) return;
+    backdrop_time_ = st.st_mtim;
     SDL_Surface *s = IMG_Load(kBackdrop);
     if (!s) {
         LOG("panel: %s: %s", kBackdrop, IMG_GetError());
@@ -478,6 +479,7 @@ void Panel::load_backdrop() {
         if (rgba->pitch == rgba->w * 4) {
             destroy(backdrop_);
             backdrop_ = upload_rgba(rgba->pixels, rgba->w, rgba->h);
+            backdrop_version_++;
         }
         SDL_FreeSurface(rgba);
     }
