@@ -4,17 +4,19 @@
 #                                             pauses that many seconds
 #   tools/record.sh -t 10                     record 10 s while you use the remote
 #   tools/record.sh -o demo.gif -w 1280 ...   output file (demo.gif) and width (960)
+#   tools/record.sh -g 0.25 RIGHT RIGHT ...   seconds after each key press (0.6)
 # Frames come from surfacemanager's captureCompositorOutput in a loop, about
 # 10 per second at 1920x1080; ffmpeg turns them into a GIF here. Only the UI
 # layer is captured: video playing behind it comes out black.
 set -e
-out=demo.gif width=960 secs=8
-while getopts o:w:t: opt; do
+out=demo.gif width=960 secs=8 gap=0.6
+while getopts o:w:t:g: opt; do
     case $opt in
         o) out=$OPTARG ;;
         w) width=$OPTARG ;;
         t) secs=$OPTARG ;;
-        *) sed -n '2,9s/^# \{0,1\}//p' "$0"; exit 1 ;;
+        g) gap=$OPTARG ;;
+        *) sed -n '2,10s/^# \{0,1\}//p' "$0"; exit 1 ;;
     esac
 done
 shift $((OPTIND - 1))
@@ -24,7 +26,7 @@ if [ $# -gt 0 ]; then
     for k in "$@"; do
         case $k in
             [0-9]*) acts="$acts sleep $k;" ;;
-            *) acts="$acts luna-send -n 1 luna://com.webos.service.networkinput/sendSpecialKey '{\"key\":\"$k\"}' </dev/null >/dev/null; sleep 0.6;" ;;
+            *) acts="$acts luna-send -n 1 luna://com.webos.service.networkinput/sendSpecialKey '{\"key\":\"$k\"}' </dev/null >/dev/null; sleep $gap;" ;;
         esac
     done
 else

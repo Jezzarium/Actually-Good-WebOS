@@ -2,7 +2,7 @@
 
 WebOS's default app launcher sucks. I decided to blatantly copy Apple's tvOS home screen and make an actually good app launcher. This also includes a Control Center for the settings you change most. It's way faster than WebOS's default menu and actually looks good. 
 
-![The home screen: moving along the dock, then switching the wallpaper in Home Settings](docs/demofinal.gif)
+![The home screen: moving through the dock and app grid, switching wallpapers and day/night in Home Settings, opening an app from its tile, the Control Center over the app, and back Home](docs/demofinal.gif)
 
 This was entirely written using Claude Code on Opus 5.5. It works on my machine but it probably won't on yours in its current state. Feel free to fork this!
 
