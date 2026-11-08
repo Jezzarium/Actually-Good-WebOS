@@ -115,6 +115,12 @@ int main(int argc, char **argv) {
     Painter painter;
     Home home;
     if (!painter.init(w, h) || !home.init(w, h, font.c_str(), assets_dir())) return 1;
+    // Home covers the screen, so its window stays opaque: blend colour only and
+    // keep the cleared alpha of 1. Blending alpha too left it below 1 wherever
+    // something was drawn with partial alpha (every icon's rounded edge, at
+    // night the whole wallpaper), and when LG composes the window over black
+    // those pixels go dark: a black ring around each icon.
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
     LOG("home: ready in %.0f ms", double(SDL_GetPerformanceCounter() - t0) * 1000 / freq);
 
     // Everything is in place before the first frame, so the screen appears

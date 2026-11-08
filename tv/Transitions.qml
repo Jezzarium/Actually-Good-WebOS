@@ -426,7 +426,7 @@ Item {
 
     // Home as it was when the tile was chosen: LG takes Home away as soon as
     // the app's window opens, and the tile grows over this instead.
-    // Home's window has alpha where it blends; LG composes it over black.
+    // LG composes Home's window over black (Home keeps its alpha at 1).
     Rectangle {
         anchors.fill: parent
         color: "black"
