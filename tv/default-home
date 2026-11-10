@@ -43,12 +43,23 @@ open_home() {
     [ -n "$home" ] || return 0
     # The TV may still be bringing up its last input; retry until home stays in front.
     for i in 1 2 3 4 5 6 7 8 9 10; do
-        if [ "$(foreground)" = "$home" ]; then
-            sleep 3
-            [ "$(foreground)" = "$home" ] && break
+        fg=$(foreground)
+        if [ "$fg" = "$home" ]; then
+            sleep 2
+            fg=$(foreground)
+            [ "$fg" = "$home" ] && break
         fi
-        luna luna://com.webos.applicationManager/launch "{\"id\":\"$home\"}" >/dev/null
-        sleep 2
+
+        case "$fg" in
+            ""|"$LG"|com.webos.app.hdmi*|com.webos.app.livetv|com.webos.app.externalinput.*)
+                luna luna://com.webos.applicationManager/launch "{\"id\":\"$home\"}" >/dev/null
+                sleep 2
+                ;;
+            *)
+                # A user app is in front; do not interrupt it.
+                break
+                ;;
+        esac
     done
     evict_lg_home
 }
